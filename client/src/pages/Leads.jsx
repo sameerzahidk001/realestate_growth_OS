@@ -1,0 +1,172 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Plus, Upload, Search, Sparkles } from 'lucide-react';
+import api from '../services/api';
+import { StatusBadge, ScoreBadge, formatSource, Modal } from '../components/ui';
+
+export default function Leads() {
+  const [leads, setLeads] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [form, setForm] = useState({ name: '', phone: '', email: '', source: 'manual', assignedTo: '' });
+
+  const loadLeads = () => {
+    const params = {};
+    if (search) params.search = search;
+    if (statusFilter) params.status = statusFilter;
+    api.get('/leads', { params }).then((res) => setLeads(res.data));
+  };
+
+  useEffect(() => {
+    loadLeads();
+    api.get('/users').then((res) => setUsers(res.data)).catch(() => {});
+  }, [search, statusFilter]);
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    await api.post('/leads', form);
+    setShowModal(false);
+    setForm({ name: '', phone: '', email: '', source: 'manual', assignedTo: '' });
+    loadLeads();
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      await api.post('/leads/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      loadLeads();
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleQualify = async (id) => {
+    await api.post(`/leads/${id}/ai-qualify`);
+    loadLeads();
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-bold">Leads</h1>
+          <p className="text-slate-500 text-sm mt-1">{leads.length} leads</p>
+        </div>
+        <div className="flex gap-2">
+          <label className="btn-secondary cursor-pointer">
+            <Upload size={16} />
+            {importing ? 'Importing...' : 'Import CSV'}
+            <input type="file" accept=".csv" className="hidden" onChange={handleImport} />
+          </label>
+          <button onClick={() => setShowModal(true)} className="btn-primary">
+            <Plus size={16} />
+            Add Lead
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input
+            className="input pl-10"
+            placeholder="Search name, phone, email..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <select className="input sm:w-48" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">All statuses</option>
+          {['new', 'contacted', 'interested', 'site_visit_done', 'negotiation', 'booked', 'lost'].map((s) => (
+            <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="text-left p-4 font-medium">Name</th>
+                <th className="text-left p-4 font-medium">Phone</th>
+                <th className="text-left p-4 font-medium">Source</th>
+                <th className="text-left p-4 font-medium">Status</th>
+                <th className="text-left p-4 font-medium">AI Score</th>
+                <th className="text-left p-4 font-medium">Assigned</th>
+                <th className="text-left p-4 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leads.map((lead) => (
+                <tr key={lead._id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                  <td className="p-4">
+                    <Link to={`/leads/${lead._id}`} className="font-medium text-brand-600 hover:underline">
+                      {lead.name}
+                    </Link>
+                  </td>
+                  <td className="p-4">{lead.phone}</td>
+                  <td className="p-4">{formatSource(lead.source)}</td>
+                  <td className="p-4"><StatusBadge status={lead.status} /></td>
+                  <td className="p-4"><ScoreBadge score={lead.aiScore} /></td>
+                  <td className="p-4">{lead.assignedTo?.name || '—'}</td>
+                  <td className="p-4">
+                    {!lead.aiQualified && (
+                      <button onClick={() => handleQualify(lead._id)} className="text-xs text-violet-600 hover:underline flex items-center gap-1">
+                        <Sparkles size={12} /> Qualify
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add New Lead">
+        <form onSubmit={handleCreate} className="space-y-4">
+          <div>
+            <label className="label">Name</label>
+            <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          </div>
+          <div>
+            <label className="label">Phone</label>
+            <input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required />
+          </div>
+          <div>
+            <label className="label">Email</label>
+            <input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </div>
+          <div>
+            <label className="label">Source</label>
+            <select className="input" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}>
+              {['manual', 'walk_in', 'website', 'facebook', 'google', 'referral', 'whatsapp', 'magicbricks', '99acres', 'housing'].map((s) => (
+                <option key={s} value={s}>{formatSource(s)}</option>
+              ))}
+            </select>
+          </div>
+          {users.length > 0 && (
+            <div>
+              <label className="label">Assign to</label>
+              <select className="input" value={form.assignedTo} onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}>
+                <option value="">Auto assign</option>
+                {users.map((u) => (
+                  <option key={u._id} value={u._id}>{u.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <button type="submit" className="btn-primary w-full">Create Lead</button>
+        </form>
+      </Modal>
+    </div>
+  );
+}
