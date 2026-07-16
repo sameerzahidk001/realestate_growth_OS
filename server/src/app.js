@@ -66,10 +66,6 @@ app.use('/api', api);
 
 app.use(errorHandler);
 
-export const initApp = async () => {
-  const { connectDB } = await import('./config/db.js');
-  await connectDB();
-  return app;
-};
+export const initApp = async () => app;
 
 export default app;

@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import prisma from '../lib/prisma.js';
+import { getSql, mapUser } from '../lib/neonSql.js';
 import { formatId } from '../utils/apiFormat.js';
 
 export const protect = async (req, res, next) => {
@@ -13,15 +13,21 @@ export const protect = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
-      include: { builder: { select: { id: true, name: true, plan: true } } },
-    });
+    const sql = getSql();
+    const rows = await sql`
+      SELECT u.*, b.id as builder_id, b.name as builder_name, b.plan as builder_plan
+      FROM "User" u
+      LEFT JOIN "Builder" b ON b.id = u."builderId"
+      WHERE u.id = ${decoded.id}
+      LIMIT 1
+    `;
 
+    const user = mapUser(rows[0]);
     if (!user || !user.isActive) {
       return res.status(401).json({ message: 'User not found or inactive' });
     }
 
+    delete user.password;
     req.user = formatId(user);
     next();
   } catch {

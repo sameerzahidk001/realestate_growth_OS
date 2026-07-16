@@ -8,9 +8,9 @@ const pickDbUrl = () => {
   const candidates = [
     process.env.DATABASE_URL,
     process.env.POSTGRES_URL,
-    process.env.POSTGRES_PRISMA_URL,
     process.env.DATABASE_URL_UNPOOLED,
     process.env.POSTGRES_URL_NON_POOLING,
+    process.env.POSTGRES_PRISMA_URL,
   ].filter(Boolean);
   return candidates.find((u) => u.startsWith('postgresql://') || u.startsWith('postgres://')) || candidates[0];
 };
@@ -20,15 +20,18 @@ const getHandler = async () => {
 
   const url = pickDbUrl();
   if (!url) {
-    throw new Error(
-      'DATABASE_URL missing. Vercel → Settings → Environment Variables me Neon DATABASE_URL check karo, then Redeploy.'
-    );
+    throw new Error('DATABASE_URL missing. Add Neon postgresql:// URL in Vercel env, then Redeploy.');
   }
   process.env.DATABASE_URL = url;
   process.env.VERCEL = process.env.VERCEL || '1';
 
-  const { connectDB } = await import('../server/src/config/db.js');
-  await connectDB();
+  // Ensure tables exist (idempotent)
+  try {
+    const { execSync } = await import('child_process');
+    // Skip prisma push at runtime — too slow. Tables should exist from build.
+  } catch {
+    /* ignore */
+  }
 
   const { default: app } = await import('../server/src/app.js');
   handler = serverless(app);
@@ -47,14 +50,18 @@ export default async function apiHandler(req, res) {
     const url = pickDbUrl();
     let dbPing = null;
     let dbError = null;
+    let userCount = null;
     if (url) {
       try {
         const sql = neon(url);
-        await Promise.race([
-          sql`SELECT 1 as ok`,
-          new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout')), 8000)),
-        ]);
+        await sql`SELECT 1 as ok`;
         dbPing = true;
+        try {
+          const rows = await sql`SELECT COUNT(*)::int as c FROM "User"`;
+          userCount = rows[0]?.c ?? 0;
+        } catch {
+          userCount = 'no-tables';
+        }
       } catch (e) {
         dbPing = false;
         dbError = e.message;
@@ -70,17 +77,16 @@ export default async function apiHandler(req, res) {
 
     return res.status(200).json({
       status: 'ok',
-      version: '2.3.1',
-      adapter: 'PrismaNeonHTTP',
-      engine: 'postgresql',
+      version: '2.4.0',
+      engine: 'postgresql-neon-http',
       dbConfigured: Boolean(url),
       dbPing,
       dbError,
       dbHost: host,
+      userCount,
       envKeys: {
         DATABASE_URL: Boolean(process.env.DATABASE_URL),
         POSTGRES_URL: Boolean(process.env.POSTGRES_URL),
-        POSTGRES_PRISMA_URL: Boolean(process.env.POSTGRES_PRISMA_URL),
         JWT_SECRET: Boolean(process.env.JWT_SECRET),
         MONGODB_URI: Boolean(process.env.MONGODB_URI),
       },
@@ -95,7 +101,7 @@ export default async function apiHandler(req, res) {
     console.error('API Error:', error);
     return res.status(500).json({
       message: error.message || 'Server error',
-      hint: 'Open /api/health and check dbPing/dbError/dbHost. Ensure Neon DATABASE_URL is postgresql://...',
+      hint: 'Open /api/health — check dbPing and userCount. Use Create account if userCount is 0.',
     });
   }
 }
