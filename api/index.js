@@ -22,7 +22,7 @@ export default async function apiHandler(req, res) {
     console.error('API Error:', error);
     return res.status(500).json({
       message: error.message || 'Server error',
-      hint: 'Check MONGODB_URI and JWT_SECRET are set in Vercel Environment Variables',
+      hint: 'Check DATABASE_URL (Neon) and JWT_SECRET in Vercel Environment Variables, then Redeploy',
     });
   }
 }
