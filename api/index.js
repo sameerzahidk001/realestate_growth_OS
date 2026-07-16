@@ -70,7 +70,7 @@ export default async function apiHandler(req, res) {
 
     return res.status(200).json({
       status: 'ok',
-      version: '2.3.0',
+      version: '2.3.1',
       adapter: 'PrismaNeonHTTP',
       engine: 'postgresql',
       dbConfigured: Boolean(url),

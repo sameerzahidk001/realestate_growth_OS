@@ -1,6 +1,5 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaNeonHTTP } from '@prisma/adapter-neon';
-import { neon } from '@neondatabase/serverless';
 
 const globalForPrisma = globalThis;
 
@@ -19,10 +18,9 @@ const getConnectionString = () => {
 const createPrismaClient = () => {
   const connectionString = getConnectionString();
 
-  // Vercel: use Neon HTTP adapter (no WebSocket / TCP — fixes 504 timeouts)
+  // Vercel: Neon HTTP adapter — pass connection STRING (not neon() function)
   if (connectionString && (process.env.VERCEL || process.env.USE_NEON_ADAPTER === '1')) {
-    const sql = neon(connectionString);
-    const adapter = new PrismaNeonHTTP(sql);
+    const adapter = new PrismaNeonHTTP(connectionString, {});
     return new PrismaClient({ adapter });
   }
 
