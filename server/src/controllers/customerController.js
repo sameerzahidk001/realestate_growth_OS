@@ -1,46 +1,64 @@
-import { Booking, Payment, ConstructionUpdate } from '../models/Booking.js';
-import { Complaint } from '../models/Support.js';
-import Lead from '../models/Lead.js';
+import prisma from '../lib/prisma.js';
+import { formatId, getBuilderId } from '../utils/apiFormat.js';
 
 export const getCustomerDashboard = async (req, res) => {
-  const lead = await Lead.findOne({ email: req.user.email, builder: req.user.builder });
-  const booking = await Booking.findOne({ lead: lead?._id })
-    .populate('project', 'name location')
-    .populate('unit', 'unitNumber type');
+  const lead = await prisma.lead.findFirst({
+    where: { email: req.user.email, builderId: getBuilderId(req.user) },
+  });
+
+  const booking = lead
+    ? await prisma.booking.findFirst({
+        where: { leadId: lead.id },
+        include: {
+          project: { select: { id: true, name: true, location: true } },
+          unit: { select: { id: true, unitNumber: true, type: true } },
+        },
+      })
+    : null;
 
   const payments = booking
-    ? await Payment.find({ booking: booking._id }).sort({ dueDate: 1 })
+    ? await prisma.payment.findMany({ where: { bookingId: booking.id }, orderBy: { dueDate: 'asc' } })
     : [];
 
   const updates = booking
-    ? await ConstructionUpdate.find({ project: booking.project, visibleToCustomers: true })
-        .sort({ publishedAt: -1 })
-        .limit(10)
+    ? await prisma.constructionUpdate.findMany({
+        where: { projectId: booking.projectId, visibleToCustomers: true },
+        orderBy: { publishedAt: 'desc' },
+        take: 10,
+      })
     : [];
 
-  res.json({ lead, booking, payments, constructionUpdates: updates });
+  res.json({
+    lead: formatId(lead),
+    booking: formatId(booking),
+    payments: formatId(payments),
+    constructionUpdates: formatId(updates),
+  });
 };
 
 export const getCustomerComplaints = async (req, res) => {
-  const complaints = await Complaint.find({ customer: req.user._id });
-  res.json(complaints);
+  const complaints = await prisma.complaint.findMany({ where: { customerId: req.user._id || req.user.id } });
+  res.json(formatId(complaints));
 };
 
 export const createComplaint = async (req, res) => {
-  const complaint = await Complaint.create({
-    ...req.body,
-    customer: req.user._id,
-    builder: req.user.builder._id || req.user.builder,
+  const complaint = await prisma.complaint.create({
+    data: {
+      builderId: getBuilderId(req.user),
+      customerId: req.user._id || req.user.id,
+      bookingId: req.body.booking,
+      subject: req.body.subject,
+      description: req.body.description,
+      category: req.body.category || 'other',
+    },
   });
-  res.status(201).json(complaint);
+  res.status(201).json(formatId(complaint));
 };
 
 export const getCustomerReferrals = async (req, res) => {
-  const lead = await Lead.findOne({ email: req.user.email });
-  const { Referral } = await import('../models/Booking.js');
-  const referrals = await Referral.find({
-    builder: req.user.builder._id || req.user.builder,
-    referrerLead: lead?._id,
+  const lead = await prisma.lead.findFirst({ where: { email: req.user.email } });
+  const referrals = await prisma.referral.findMany({
+    where: { builderId: getBuilderId(req.user), referrerLeadId: lead?.id },
   });
-  res.json(referrals);
+  res.json(formatId(referrals));
 };

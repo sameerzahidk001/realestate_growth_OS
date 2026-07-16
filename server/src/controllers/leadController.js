@@ -1,153 +1,207 @@
 import { parse } from 'csv-parse/sync';
-import Lead from '../models/Lead.js';
+import prisma from '../lib/prisma.js';
 import { calculateLeadScore, qualifyLead } from '../services/aiService.js';
+import { formatId, getBuilderId, getUserId } from '../utils/apiFormat.js';
 
-const buildLeadFilter = (user, query = {}) => {
-  const filter = { builder: user.builder._id || user.builder };
+const leadInclude = {
+  assignedTo: { select: { id: true, name: true, email: true, phone: true } },
+  project: { select: { id: true, name: true, location: true } },
+  unit: { select: { id: true, unitNumber: true, type: true, price: true } },
+  activities: { orderBy: { createdAt: 'asc' } },
+};
+
+const buildLeadWhere = (user, query = {}) => {
+  const where = { builderId: getBuilderId(user) };
 
   if (user.role === 'sales_executive') {
-    filter.assignedTo = user._id;
+    where.assignedToId = getUserId(user);
   } else if (query.assignedTo) {
-    filter.assignedTo = query.assignedTo;
+    where.assignedToId = query.assignedTo;
   }
 
-  if (query.status) filter.status = query.status;
-  if (query.source) filter.source = query.source;
+  if (query.status) where.status = query.status;
+  if (query.source) where.source = query.source;
   if (query.search) {
-    filter.$or = [
-      { name: { $regex: query.search, $options: 'i' } },
-      { phone: { $regex: query.search, $options: 'i' } },
-      { email: { $regex: query.search, $options: 'i' } },
+    where.OR = [
+      { name: { contains: query.search, mode: 'insensitive' } },
+      { phone: { contains: query.search } },
+      { email: { contains: query.search, mode: 'insensitive' } },
     ];
   }
 
-  return filter;
+  return where;
 };
 
+const formatLead = (lead) => formatId(lead);
+
 export const getLeads = async (req, res) => {
-  const filter = buildLeadFilter(req.user, req.query);
-  const leads = await Lead.find(filter)
-    .populate('assignedTo', 'name email')
-    .populate('project', 'name location')
-    .sort({ aiScore: -1, createdAt: -1 });
-  res.json(leads);
+  const leads = await prisma.lead.findMany({
+    where: buildLeadWhere(req.user, req.query),
+    include: {
+      assignedTo: { select: { id: true, name: true, email: true } },
+      project: { select: { id: true, name: true, location: true } },
+    },
+    orderBy: [{ aiScore: 'desc' }, { createdAt: 'desc' }],
+  });
+  res.json(formatLead(leads));
 };
 
 export const getLead = async (req, res) => {
-  const filter = { _id: req.params.id, ...buildLeadFilter(req.user) };
-  const lead = await Lead.findOne(filter)
-    .populate('assignedTo', 'name email phone')
-    .populate('project', 'name location')
-    .populate('unit', 'unitNumber type price');
-
+  const lead = await prisma.lead.findFirst({
+    where: { id: req.params.id, ...buildLeadWhere(req.user) },
+    include: leadInclude,
+  });
   if (!lead) return res.status(404).json({ message: 'Lead not found' });
-  res.json(lead);
+  res.json(formatLead(lead));
 };
 
 export const createLead = async (req, res) => {
-  const data = { ...req.body, builder: req.user.builder._id || req.user.builder };
+  const builderId = getBuilderId(req.user);
+  const assignedToId = req.body.assignedTo || (req.user.role === 'sales_executive' ? getUserId(req.user) : null);
 
-  if (!data.assignedTo && req.user.role === 'sales_executive') {
-    data.assignedTo = req.user._id;
-  }
-
-  const lead = await Lead.create(data);
-  lead.aiScore = calculateLeadScore(lead);
-  lead.activities.push({
-    type: 'note',
-    description: 'Lead created',
-    createdBy: req.user._id,
+  const lead = await prisma.lead.create({
+    data: {
+      builderId,
+      name: req.body.name,
+      phone: req.body.phone,
+      email: req.body.email,
+      source: req.body.source || 'manual',
+      status: 'new',
+      assignedToId,
+      projectId: req.body.project,
+      notes: req.body.notes,
+      budgetMin: req.body.budget?.min,
+      budgetMax: req.body.budget?.max,
+      bhkPreference: req.body.bhkPreference,
+      timeline: req.body.timeline,
+    },
   });
-  await lead.save();
 
-  const populated = await Lead.findById(lead._id).populate('assignedTo', 'name');
-  res.status(201).json(populated);
+  const aiScore = calculateLeadScore(formatLead(lead));
+  await prisma.leadActivity.create({
+    data: { leadId: lead.id, type: 'note', description: 'Lead created', createdById: getUserId(req.user) },
+  });
+
+  const updated = await prisma.lead.update({
+    where: { id: lead.id },
+    data: { aiScore },
+    include: { assignedTo: { select: { id: true, name: true } } },
+  });
+
+  res.status(201).json(formatLead(updated));
 };
 
 export const updateLead = async (req, res) => {
-  const filter = { _id: req.params.id, builder: req.user.builder._id || req.user.builder };
-  if (req.user.role === 'sales_executive') filter.assignedTo = req.user._id;
+  const where = { id: req.params.id, builderId: getBuilderId(req.user) };
+  if (req.user.role === 'sales_executive') where.assignedToId = getUserId(req.user);
 
-  const existing = await Lead.findOne(filter);
+  const existing = await prisma.lead.findFirst({ where });
   if (!existing) return res.status(404).json({ message: 'Lead not found' });
 
   if (req.body.status && req.body.status !== existing.status) {
-    existing.activities.push({
-      type: 'status_change',
-      description: `Status changed from ${existing.status} to ${req.body.status}`,
-      oldValue: existing.status,
-      newValue: req.body.status,
-      createdBy: req.user._id,
+    await prisma.leadActivity.create({
+      data: {
+        leadId: existing.id,
+        type: 'status_change',
+        description: `Status changed from ${existing.status} to ${req.body.status}`,
+        oldValue: existing.status,
+        newValue: req.body.status,
+        createdById: getUserId(req.user),
+      },
     });
   }
 
-  Object.assign(existing, req.body);
-  existing.aiScore = calculateLeadScore(existing);
-  await existing.save();
+  const data = { ...req.body };
+  delete data.budget;
+  if (req.body.budget) {
+    data.budgetMin = req.body.budget.min;
+    data.budgetMax = req.body.budget.max;
+  }
+  if (req.body.assignedTo) data.assignedToId = req.body.assignedTo;
+  if (req.body.project) data.projectId = req.body.project;
+  if (req.body.unit) data.unitId = req.body.unit;
 
-  const lead = await Lead.findById(existing._id).populate('assignedTo', 'name');
-  res.json(lead);
+  const lead = await prisma.lead.update({
+    where: { id: existing.id },
+    data: { ...data, aiScore: calculateLeadScore({ ...existing, ...req.body }) },
+    include: { assignedTo: { select: { id: true, name: true } } },
+  });
+
+  res.json(formatLead(lead));
 };
 
 export const updateLeadStatus = async (req, res) => {
   const { status } = req.body;
-  const filter = { _id: req.params.id, builder: req.user.builder._id || req.user.builder };
-  if (req.user.role === 'sales_executive') filter.assignedTo = req.user._id;
+  const where = { id: req.params.id, builderId: getBuilderId(req.user) };
+  if (req.user.role === 'sales_executive') where.assignedToId = getUserId(req.user);
 
-  const lead = await Lead.findOne(filter);
-  if (!lead) return res.status(404).json({ message: 'Lead not found' });
+  const existing = await prisma.lead.findFirst({ where });
+  if (!existing) return res.status(404).json({ message: 'Lead not found' });
 
-  lead.activities.push({
-    type: 'status_change',
-    description: `Pipeline: ${lead.status} → ${status}`,
-    oldValue: lead.status,
-    newValue: status,
-    createdBy: req.user._id,
+  await prisma.leadActivity.create({
+    data: {
+      leadId: existing.id,
+      type: 'status_change',
+      description: `Pipeline: ${existing.status} → ${status}`,
+      oldValue: existing.status,
+      newValue: status,
+      createdById: getUserId(req.user),
+    },
   });
-  lead.status = status;
-  lead.aiScore = calculateLeadScore(lead);
-  await lead.save();
 
-  res.json(lead);
+  const lead = await prisma.lead.update({
+    where: { id: existing.id },
+    data: { status, aiScore: calculateLeadScore({ ...existing, status }) },
+    include: { assignedTo: { select: { id: true, name: true } }, project: { select: { id: true, name: true } } },
+  });
+
+  res.json(formatLead(lead));
 };
 
 export const assignLead = async (req, res) => {
   const { assignedTo } = req.body;
-  const lead = await Lead.findOneAndUpdate(
-    { _id: req.params.id, builder: req.user.builder._id || req.user.builder },
-    { assignedTo },
-    { new: true }
-  ).populate('assignedTo', 'name');
-
-  if (!lead) return res.status(404).json({ message: 'Lead not found' });
-
-  lead.activities.push({
-    type: 'assignment',
-    description: `Assigned to ${lead.assignedTo?.name}`,
-    createdBy: req.user._id,
+  const lead = await prisma.lead.updateMany({
+    where: { id: req.params.id, builderId: getBuilderId(req.user) },
+    data: { assignedToId: assignedTo },
   });
-  await lead.save();
+  if (!lead.count) return res.status(404).json({ message: 'Lead not found' });
 
-  res.json(lead);
+  const updated = await prisma.lead.findUnique({
+    where: { id: req.params.id },
+    include: { assignedTo: { select: { id: true, name: true } } },
+  });
+
+  await prisma.leadActivity.create({
+    data: {
+      leadId: updated.id,
+      type: 'assignment',
+      description: `Assigned to ${updated.assignedTo?.name}`,
+      createdById: getUserId(req.user),
+    },
+  });
+
+  res.json(formatLead(updated));
 };
 
 export const addLeadNote = async (req, res) => {
   const { note, type = 'note' } = req.body;
-  const filter = { _id: req.params.id, builder: req.user.builder._id || req.user.builder };
-  if (req.user.role === 'sales_executive') filter.assignedTo = req.user._id;
+  const where = { id: req.params.id, builderId: getBuilderId(req.user) };
+  if (req.user.role === 'sales_executive') where.assignedToId = getUserId(req.user);
 
-  const lead = await Lead.findOne(filter);
+  const lead = await prisma.lead.findFirst({ where, include: leadInclude });
   if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-  lead.activities.push({
-    type,
-    description: note,
-    createdBy: req.user._id,
+  await prisma.leadActivity.create({
+    data: { leadId: lead.id, type, description: note, createdById: getUserId(req.user) },
   });
-  lead.lastContactedAt = new Date();
-  await lead.save();
 
-  res.json(lead);
+  const updated = await prisma.lead.update({
+    where: { id: lead.id },
+    data: { lastContactedAt: new Date() },
+    include: leadInclude,
+  });
+
+  res.json(formatLead(updated));
 };
 
 export const importLeads = async (req, res) => {
@@ -161,70 +215,93 @@ export const importLeads = async (req, res) => {
 
   const created = [];
   for (const row of records) {
-    const lead = await Lead.create({
-      builder: req.user.builder._id || req.user.builder,
-      name: row.name || row.Name,
-      phone: row.phone || row.Phone,
-      email: row.email || row.Email,
-      source: (row.source || row.Source || 'manual').toLowerCase().replace(/\s+/g, '_'),
-      status: 'new',
-      assignedTo: req.body.assignedTo || req.user._id,
-      notes: row.notes || row.Notes,
+    const lead = await prisma.lead.create({
+      data: {
+        builderId: getBuilderId(req.user),
+        name: row.name || row.Name,
+        phone: row.phone || row.Phone,
+        email: row.email || row.Email,
+        source: (row.source || row.Source || 'manual').toLowerCase().replace(/\s+/g, '_'),
+        status: 'new',
+        assignedToId: req.body.assignedTo || getUserId(req.user),
+        notes: row.notes || row.Notes,
+        aiScore: 20,
+      },
     });
-    lead.aiScore = calculateLeadScore(lead);
-    await lead.save();
-    created.push(lead);
+    created.push(formatLead(lead));
   }
 
   res.status(201).json({ imported: created.length, leads: created });
 };
 
 export const getPipeline = async (req, res) => {
-  const filter = buildLeadFilter(req.user);
+  const where = buildLeadWhere(req.user);
   const stages = ['new', 'contacted', 'interested', 'site_visit_done', 'negotiation', 'booked', 'lost'];
   const pipeline = {};
 
   for (const stage of stages) {
-    pipeline[stage] = await Lead.find({ ...filter, status: stage })
-      .populate('assignedTo', 'name')
-      .populate('project', 'name')
-      .sort({ aiScore: -1, updatedAt: -1 });
+    const leads = await prisma.lead.findMany({
+      where: { ...where, status: stage },
+      include: {
+        assignedTo: { select: { id: true, name: true } },
+        project: { select: { id: true, name: true } },
+      },
+      orderBy: [{ aiScore: 'desc' }, { updatedAt: 'desc' }],
+    });
+    pipeline[stage] = formatLead(leads);
   }
 
   res.json(pipeline);
 };
 
 export const aiQualifyLead = async (req, res) => {
-  const lead = await Lead.findOne({
-    _id: req.params.id,
-    builder: req.user.builder._id || req.user.builder,
+  const lead = await prisma.lead.findFirst({
+    where: { id: req.params.id, builderId: getBuilderId(req.user) },
+    include: leadInclude,
   });
-
   if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-  const qualification = await qualifyLead(lead);
-  lead.aiQualificationData = qualification;
-  lead.aiQualified = true;
-  lead.budget = qualification.budget?.min
-    ? { min: qualification.budget.min, max: qualification.budget.max }
-    : lead.budget;
-  if (typeof qualification.budget === 'string') {
-    const match = qualification.budget.match(/(\d+)[^\d]+(\d+)/);
-    if (match) lead.budget = { min: parseInt(match[1]) * 100000, max: parseInt(match[2]) * 100000 };
-  }
-  lead.preferredLocation = qualification.location || lead.preferredLocation;
-  lead.loanRequired = qualification.loanRequired ?? lead.loanRequired;
-  lead.familySize = qualification.familySize || lead.familySize;
-  lead.timeline = qualification.timeline || lead.timeline;
-  lead.bhkPreference = qualification.bhkPreference || lead.bhkPreference;
-  lead.aiScore = calculateLeadScore(lead);
-  lead.activities.push({
-    type: 'ai_qualification',
-    description: qualification.summary || 'AI qualification completed',
-    createdBy: req.user._id,
-    metadata: qualification,
-  });
-  await lead.save();
+  const qualification = await qualifyLead(formatLead(lead));
+  let budgetMin = lead.budgetMin;
+  let budgetMax = lead.budgetMax;
 
-  res.json({ lead, qualification });
+  if (qualification.budget?.min) {
+    budgetMin = qualification.budget.min;
+    budgetMax = qualification.budget.max;
+  } else if (typeof qualification.budget === 'string') {
+    const match = qualification.budget.match(/(\d+)[^\d]+(\d+)/);
+    if (match) {
+      budgetMin = parseInt(match[1], 10) * 100000;
+      budgetMax = parseInt(match[2], 10) * 100000;
+    }
+  }
+
+  const updated = await prisma.lead.update({
+    where: { id: lead.id },
+    data: {
+      aiQualificationData: qualification,
+      aiQualified: true,
+      budgetMin,
+      budgetMax,
+      preferredLocation: qualification.location || lead.preferredLocation,
+      loanRequired: qualification.loanRequired ?? lead.loanRequired,
+      familySize: qualification.familySize || lead.familySize,
+      timeline: qualification.timeline || lead.timeline,
+      bhkPreference: qualification.bhkPreference || lead.bhkPreference,
+      aiScore: calculateLeadScore({ ...formatLead(lead), ...qualification, budget: { min: budgetMin, max: budgetMax } }),
+    },
+    include: leadInclude,
+  });
+
+  await prisma.leadActivity.create({
+    data: {
+      leadId: lead.id,
+      type: 'ai_qualification',
+      description: qualification.summary || 'AI qualification completed',
+      createdById: getUserId(req.user),
+      metadata: qualification,
+    },
+  });
+
+  res.json({ lead: formatLead(updated), qualification });
 };

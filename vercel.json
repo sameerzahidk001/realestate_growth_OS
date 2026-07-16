@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "cd client && npm install && npm run build",
+  "buildCommand": "cd server && npx prisma generate && npx prisma db push && cd ../client && npm install && npm run build",
   "outputDirectory": "client/dist",
   "installCommand": "npm install && cd server && npm install && cd ../client && npm install",
   "framework": null,
@@ -11,7 +11,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 30,
-      "includeFiles": "server/src/**"
+      "includeFiles": "server/**"
     }
   }
 }

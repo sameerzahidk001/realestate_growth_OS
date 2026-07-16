@@ -1,66 +1,66 @@
-# Vercel Deployment Guide
+# Vercel + PostgreSQL Deployment (Neon Free)
 
-## 1. GitHub Push (done via terminal)
+## 1. Create FREE PostgreSQL (Neon — 2 minutes)
 
-```bash
-cd C:\Users\HP\real-estate-growth-os
-git init
-git add .
-git commit -m "Initial commit: Growth OS MERN full platform"
-git branch -M main
-git remote add origin https://github.com/sameerzahidk001/realestate_growth_OS.git
-git push -u origin main
-```
-
-## 2. MongoDB Atlas (Required for production)
-
-1. Go to https://cloud.mongodb.com → Create free cluster
-2. Database Access → Add user + password
-3. Network Access → Add IP `0.0.0.0/0` (allow all)
-4. Connect → Get connection string:
+1. Go to **https://neon.tech** → Sign up free
+2. **Create Project** → name: `growth-os`
+3. Copy the connection string (looks like):
    ```
-   mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/real-estate-growth-os
+   postgresql://neondb_owner:PASSWORD@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
    ```
 
-## 3. Vercel Deploy
+## 2. Vercel Environment Variables
 
-1. Go to https://vercel.com → Login with GitHub
-2. **Add New Project** → Import `sameerzahidk001/realestate_growth_OS`
-3. Settings (auto-detected from vercel.json):
-   - **Root Directory:** `.` (project root)
-   - **Build Command:** `cd client && npm install && npm run build`
-   - **Output Directory:** `client/dist`
-
-4. **Environment Variables** (Vercel → Project → Settings → Environment Variables):
+Vercel → Project → **Settings → Environment Variables**
 
 | Name | Value |
-|------|-------|
-| `MONGODB_URI` | Your MongoDB Atlas connection string |
-| `JWT_SECRET` | Any long random secret string |
+|------|--------|
+| `DATABASE_URL` | Neon connection string (paste exact) |
+| `JWT_SECRET` | `growthos_secret_key_2026_random` |
 | `JWT_EXPIRE` | `7d` |
-| `CLIENT_URL` | `https://your-app.vercel.app` (after first deploy) |
-| `VITE_DEMO_PHASE` | `1` (Phase 1 demo for client) |
-| `OPENAI_API_KEY` | Optional |
+| `CLIENT_URL` | `https://realestate-growth-os.vercel.app` |
+| `VITE_DEMO_PHASE` | `1` |
 
-5. Click **Deploy**
+**Remove old `MONGODB_URI` if it exists.**
 
-6. After deploy, update `CLIENT_URL` to your actual Vercel URL and redeploy.
+## 3. Redeploy
 
-## 4. Seed production database (one time)
+GitHub push triggers auto-deploy, OR manually **Redeploy** in Vercel.
 
-Run locally with production MongoDB URI:
+Build automatically runs:
+- `prisma generate` — creates DB client
+- `prisma db push` — creates all tables
+- `vite build` — builds frontend
+
+## 4. Seed demo data (one time)
+
+After first successful deploy, run locally:
 
 ```bash
-cd server
-set MONGODB_URI=mongodb+srv://...
+cd C:\Users\HP\real-estate-growth-os\server
+set DATABASE_URL=postgresql://YOUR_NEON_CONNECTION_STRING
 npm run seed
 ```
 
-## 5. Live URLs
-
-- App: `https://realestate-growth-os.vercel.app` (or your assigned URL)
-- API health: `https://your-url.vercel.app/api/health`
-
-## Demo Login
-
+Then login:
 - `owner@skyline.com` / `password123`
+
+**OR** use **Create account** on live site (no seed needed).
+
+## 5. Test
+
+- Health: `https://realestate-growth-os.vercel.app/api/health`
+- Login: `https://realestate-growth-os.vercel.app/login`
+
+## Local development
+
+```bash
+# Use Neon URL or local PostgreSQL
+copy server\.env.example server\.env
+# Edit DATABASE_URL in server\.env
+
+cd C:\Users\HP\real-estate-growth-os
+npm run db:push
+npm run seed
+npm run dev
+```

@@ -1,53 +1,65 @@
-import SiteVisit from '../models/SiteVisit.js';
-import Lead from '../models/Lead.js';
+import prisma from '../lib/prisma.js';
+import { formatId, getBuilderId, getUserId } from '../utils/apiFormat.js';
 
 export const getSiteVisits = async (req, res) => {
-  const filter = { builder: req.user.builder._id || req.user.builder };
-  if (req.user.role === 'sales_executive') filter.assignedTo = req.user._id;
-  if (req.query.status) filter.status = req.query.status;
+  const where = { builderId: getBuilderId(req.user) };
+  if (req.user.role === 'sales_executive') where.assignedToId = getUserId(req.user);
+  if (req.query.status) where.status = req.query.status;
 
-  const visits = await SiteVisit.find(filter)
-    .populate('lead', 'name phone')
-    .populate('project', 'name location')
-    .populate('assignedTo', 'name')
-    .sort({ scheduledAt: -1 });
-
-  res.json(visits);
+  const visits = await prisma.siteVisit.findMany({
+    where,
+    include: {
+      lead: { select: { id: true, name: true, phone: true } },
+      project: { select: { id: true, name: true, location: true } },
+      assignedTo: { select: { id: true, name: true } },
+    },
+    orderBy: { scheduledAt: 'desc' },
+  });
+  res.json(formatId(visits));
 };
 
 export const createSiteVisit = async (req, res) => {
-  const visit = await SiteVisit.create({
-    ...req.body,
-    builder: req.user.builder._id || req.user.builder,
-    assignedTo: req.body.assignedTo || req.user._id,
+  const visit = await prisma.siteVisit.create({
+    data: {
+      leadId: req.body.lead,
+      builderId: getBuilderId(req.user),
+      projectId: req.body.project,
+      assignedToId: req.body.assignedTo || getUserId(req.user),
+      scheduledAt: new Date(req.body.scheduledAt),
+    },
+    include: {
+      lead: { select: { id: true, name: true, phone: true } },
+      project: { select: { id: true, name: true } },
+    },
   });
 
-  await Lead.findByIdAndUpdate(req.body.lead, {
-    status: 'interested',
-    lastContactedAt: new Date(),
+  await prisma.lead.update({
+    where: { id: req.body.lead },
+    data: { status: 'interested', lastContactedAt: new Date() },
   });
 
-  const populated = await SiteVisit.findById(visit._id)
-    .populate('lead', 'name phone')
-    .populate('project', 'name');
-
-  res.status(201).json(populated);
+  res.status(201).json(formatId(visit));
 };
 
 export const updateSiteVisit = async (req, res) => {
-  const visit = await SiteVisit.findOneAndUpdate(
-    { _id: req.params.id, builder: req.user.builder._id || req.user.builder },
-    req.body,
-    { new: true }
-  )
-    .populate('lead', 'name')
-    .populate('project', 'name');
+  const data = { ...req.body };
+  if (req.body.scheduledAt) data.scheduledAt = new Date(req.body.scheduledAt);
+  if (req.body.status === 'completed') data.completedAt = new Date();
 
-  if (!visit) return res.status(404).json({ message: 'Site visit not found' });
+  const result = await prisma.siteVisit.updateMany({
+    where: { id: req.params.id, builderId: getBuilderId(req.user) },
+    data,
+  });
+  if (!result.count) return res.status(404).json({ message: 'Site visit not found' });
 
-  if (req.body.status === 'completed' && visit.lead) {
-    await Lead.findByIdAndUpdate(visit.lead._id, { status: 'site_visit_done' });
+  const visit = await prisma.siteVisit.findUnique({
+    where: { id: req.params.id },
+    include: { lead: { select: { id: true, name: true } }, project: { select: { id: true, name: true } } },
+  });
+
+  if (req.body.status === 'completed' && visit?.leadId) {
+    await prisma.lead.update({ where: { id: visit.leadId }, data: { status: 'site_visit_done' } });
   }
 
-  res.json(visit);
+  res.json(formatId(visit));
 };

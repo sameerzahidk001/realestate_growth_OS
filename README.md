@@ -7,7 +7,7 @@ A full-stack MERN application implementing all 9 phases from the Real Estate Gro
 ## Tech Stack
 
 - **Frontend:** React 18, Vite, Tailwind CSS, Recharts, DnD Kit
-- **Backend:** Node.js, Express, MongoDB, Mongoose
+- **Backend:** Node.js, Express, PostgreSQL, Prisma ORM
 - **Auth:** JWT with role-based access control
 - **AI:** OpenAI integration (with intelligent fallbacks when no API key)
 
@@ -47,9 +47,8 @@ copy server\.env.example server\.env
 
 Edit `server/.env`:
 ```
-MONGODB_URI=mongodb://localhost:27017/real-estate-growth-os
+DATABASE_URL=postgresql://user:pass@host/db?sslmode=require
 JWT_SECRET=your-secret-key
-OPENAI_API_KEY=sk-...   # Optional — works without it using fallbacks
 ```
 
 ### Seed Demo Data

@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
-import Builder from '../models/Builder.js';
-import User from '../models/User.js';
+import prisma from '../lib/prisma.js';
+import { hashPassword, matchPassword } from '../lib/password.js';
+import { formatId, getUserId } from '../utils/apiFormat.js';
 
 const signToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '7d' });
@@ -8,52 +9,59 @@ const signToken = (id) =>
 export const register = async (req, res) => {
   const { builderName, name, email, password, phone } = req.body;
 
-  const existing = await User.findOne({ email });
+  const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) return res.status(400).json({ message: 'Email already registered' });
 
-  const builder = await Builder.create({ name: builderName, email, phone });
-  const user = await User.create({
-    name,
-    email,
-    password,
-    phone,
-    role: 'owner',
-    builder: builder._id,
+  const builder = await prisma.builder.create({
+    data: { name: builderName, email, phone },
   });
 
-  const token = signToken(user._id);
+  const user = await prisma.user.create({
+    data: {
+      name,
+      email,
+      password: await hashPassword(password),
+      phone,
+      role: 'owner',
+      builderId: builder.id,
+    },
+  });
+
+  const token = signToken(user.id);
   res.status(201).json({
     token,
-    user: { id: user._id, name: user.name, email: user.email, role: user.role, builder: builder._id },
-    builder,
+    user: formatId({ ...user, builder: formatId(builder) }),
+    builder: formatId(builder),
   });
 };
 
 export const login = async (req, res) => {
   const { email, password } = req.body;
-  const user = await User.findOne({ email }).select('+password').populate('builder', 'name plan');
+  const user = await prisma.user.findUnique({
+    where: { email },
+    include: { builder: { select: { id: true, name: true, plan: true } } },
+  });
 
-  if (!user || !(await user.matchPassword(password))) {
+  if (!user || !(await matchPassword(password, user.password))) {
     return res.status(401).json({ message: 'Invalid credentials' });
   }
 
-  user.lastLogin = new Date();
-  await user.save();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { lastLogin: new Date() },
+  });
 
-  const token = signToken(user._id);
+  const token = signToken(user.id);
   res.json({
     token,
-    user: {
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      builder: user.builder,
-    },
+    user: formatId(user),
   });
 };
 
 export const getMe = async (req, res) => {
-  const user = await User.findById(req.user._id).populate('builder');
-  res.json(user);
+  const user = await prisma.user.findUnique({
+    where: { id: getUserId(req.user) },
+    include: { builder: true },
+  });
+  res.json(formatId(user));
 };

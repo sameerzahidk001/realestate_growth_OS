@@ -1,0 +1,507 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Builder {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  phone     String?
+  address   String?
+  city      String?
+  logo      String?
+  plan      String   @default("pilot")
+  isActive  Boolean  @default(true)
+  timezone  String   @default("Asia/Kolkata")
+  currency  String   @default("INR")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users               User[]
+  projects            Project[]
+  leads               Lead[]
+  followUps           FollowUp[]
+  siteVisits          SiteVisit[]
+  units               Unit[]
+  bookings            Booking[]
+  payments            Payment[]
+  loans               Loan[]
+  possessions         Possession[]
+  constructionUpdates ConstructionUpdate[]
+  referrals           Referral[]
+  landingPages        LandingPage[]
+  campaigns           Campaign[]
+  marketingCampaigns  MarketingCampaign[]
+  competitors         Competitor[]
+  pilotFeedbacks      PilotFeedback[]
+  usageLogs           UsageLog[]
+  aiAlerts            AIAlert[]
+  aiConversations     AIConversation[]
+  complaints          Complaint[]
+}
+
+model User {
+  id                   String    @id @default(cuid())
+  name                 String
+  email                String    @unique
+  password             String
+  phone                String?
+  role                 String    @default("sales_executive")
+  builderId            String
+  isActive             Boolean   @default(true)
+  lastLogin            DateTime?
+  leadsAssigned        Int       @default(0)
+  leadsConverted       Int       @default(0)
+  siteVisitsCompleted  Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  builder      Builder    @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  assignedLeads Lead[]    @relation("AssignedLeads")
+  followUps    FollowUp[]
+  siteVisits   SiteVisit[]
+  activities   LeadActivity[]
+  complaints   Complaint[]
+  pilotFeedbacks PilotFeedback[]
+  usageLogs    UsageLog[]
+  aiConversations AIConversation[]
+}
+
+model Project {
+  id              String   @id @default(cuid())
+  builderId       String
+  name            String
+  location        String
+  city            String?
+  totalUnits      Int      @default(0)
+  description     String?
+  amenities       String[] @default([])
+  priceList       Json?
+  brochure        String?
+  images          String[] @default([])
+  status          String   @default("under_construction")
+  launchDate      DateTime?
+  possessionDate  DateTime?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  builder             Builder              @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  units               Unit[]
+  leads               Lead[]
+  siteVisits          SiteVisit[]
+  bookings            Booking[]
+  constructionUpdates ConstructionUpdate[]
+  landingPages        LandingPage[]
+}
+
+model Unit {
+  id          String   @id @default(cuid())
+  projectId   String
+  builderId   String
+  unitNumber  String
+  type        String
+  floor       Int?
+  area        String?
+  price       Int
+  facing      String?
+  status      String   @default("available")
+  linkedLeadId String?
+  linkedBookingId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  builder Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  leads   Lead[]
+  bookings Booking[]
+
+  @@unique([projectId, unitNumber])
+}
+
+model Lead {
+  id                  String    @id @default(cuid())
+  builderId           String
+  name                String
+  email               String?
+  phone               String
+  source              String    @default("manual")
+  status              String    @default("new")
+  assignedToId        String?
+  projectId           String?
+  unitId              String?
+  budgetMin           Int?
+  budgetMax           Int?
+  preferredLocation   String?
+  bhkPreference       String?
+  loanRequired        Boolean?
+  familySize          Int?
+  timeline            String?
+  notes               String?
+  tags                String[]  @default([])
+  aiScore             Int       @default(0)
+  aiQualified         Boolean   @default(false)
+  aiQualificationData Json?
+  lastContactedAt     DateTime?
+  nextFollowUpAt      DateTime?
+  lostReason          String?
+  referredById        String?
+  campaignId          String?
+  isSilent            Boolean   @default(false)
+  silentSince         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  builder      Builder        @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  assignedTo   User?          @relation("AssignedLeads", fields: [assignedToId], references: [id])
+  project      Project?       @relation(fields: [projectId], references: [id])
+  unit         Unit?          @relation(fields: [unitId], references: [id])
+  campaign     Campaign?      @relation(fields: [campaignId], references: [id])
+  activities   LeadActivity[]
+  followUps    FollowUp[]
+  siteVisits   SiteVisit[]
+  bookings     Booking[]
+  aiAlerts     AIAlert[]
+  aiConversations AIConversation[]
+  referralsAsReferrer Referral[] @relation("ReferrerLead")
+  referralsAsReferred Referral[] @relation("ReferredLead")
+}
+
+model LeadActivity {
+  id          String   @id @default(cuid())
+  leadId      String
+  type        String
+  description String?
+  oldValue    String?
+  newValue    String?
+  createdById String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  lead      Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdBy User? @relation(fields: [createdById], references: [id])
+}
+
+model FollowUp {
+  id            String    @id @default(cuid())
+  leadId        String
+  builderId     String
+  assignedToId  String
+  scheduledAt   DateTime
+  type          String    @default("call")
+  notes         String?
+  status        String    @default("pending")
+  completedAt   DateTime?
+  summary       String?
+  isAiGenerated Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  lead       Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  builder    Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  assignedTo User    @relation(fields: [assignedToId], references: [id])
+}
+
+model SiteVisit {
+  id            String    @id @default(cuid())
+  leadId        String
+  builderId     String
+  projectId     String
+  assignedToId  String
+  scheduledAt   DateTime
+  status        String    @default("scheduled")
+  feedback      String?
+  rating        Int?
+  interestLevel String?
+  completedAt   DateTime?
+  aiPlanned     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  lead       Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  builder    Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  project    Project @relation(fields: [projectId], references: [id])
+  assignedTo User    @relation(fields: [assignedToId], references: [id])
+}
+
+model Booking {
+  id                    String   @id @default(cuid())
+  builderId             String
+  leadId                String
+  projectId             String
+  unitId                String
+  customerId            String?
+  bookingAmount         Int
+  totalPrice            Int
+  status                String   @default("confirmed")
+  agreementDocumentUrl  String?
+  agreementSignedAt     DateTime?
+  agreementTemplateData Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  builder    Builder     @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  lead       Lead        @relation(fields: [leadId], references: [id])
+  project    Project     @relation(fields: [projectId], references: [id])
+  unit       Unit        @relation(fields: [unitId], references: [id])
+  payments   Payment[]
+  loans      Loan[]
+  possessions Possession[]
+}
+
+model Payment {
+  id                String    @id @default(cuid())
+  bookingId         String
+  builderId         String
+  amount            Int
+  dueDate           DateTime
+  paidDate          DateTime?
+  status            String    @default("pending")
+  paymentMethod     String?
+  transactionId     String?
+  notes             String?
+  installmentNumber Int?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  builder Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+}
+
+model Loan {
+  id           String    @id @default(cuid())
+  bookingId    String
+  builderId    String
+  bankName     String?
+  loanAmount   Int?
+  status       String    @default("not_started")
+  emiAmount    Int?
+  tenureMonths Int?
+  notes        String?
+  lastUpdated  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  builder Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+}
+
+model Possession {
+  id             String   @id @default(cuid())
+  bookingId      String
+  builderId      String
+  scheduledDate  DateTime?
+  status         String   @default("pending")
+  checklist      Json?
+  documents      Json?
+  handoverNotes  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  builder Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+}
+
+model ConstructionUpdate {
+  id                 String   @id @default(cuid())
+  projectId          String
+  builderId          String
+  title              String
+  description        String?
+  milestone          String?
+  progressPercent    Int?
+  media              Json?
+  publishedAt        DateTime @default(now())
+  visibleToCustomers Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  builder Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+}
+
+model Referral {
+  id                 String   @id @default(cuid())
+  builderId          String
+  referrerLeadId     String?
+  referrerCustomerId String?
+  referredLeadId     String?
+  referredName       String?
+  referredPhone      String?
+  status             String   @default("pending")
+  incentiveAmount    Int?
+  incentivePaid      Boolean  @default(false)
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  builder      Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  referrerLead Lead?   @relation("ReferrerLead", fields: [referrerLeadId], references: [id])
+  referredLead Lead?   @relation("ReferredLead", fields: [referredLeadId], references: [id])
+}
+
+model LandingPage {
+  id            String   @id @default(cuid())
+  builderId     String
+  projectId     String?
+  title         String
+  slug          String   @unique
+  blocks        Json?
+  isPublished   Boolean  @default(false)
+  leadsCaptured Int      @default(0)
+  theme         Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  builder  Builder   @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  project  Project?  @relation(fields: [projectId], references: [id])
+  campaigns Campaign[]
+}
+
+model Campaign {
+  id                 String   @id @default(cuid())
+  builderId          String
+  name               String
+  platform           String
+  status             String   @default("draft")
+  budget             Int?
+  leadsGenerated     Int      @default(0)
+  spend              Int      @default(0)
+  aiSuggestions      Json?
+  externalCampaignId String?
+  landingPageId      String?
+  targetAudience     Json?
+  startDate          DateTime?
+  endDate            DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  builder     Builder      @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  landingPage LandingPage? @relation(fields: [landingPageId], references: [id])
+  leads       Lead[]
+}
+
+model MarketingCampaign {
+  id        String   @id @default(cuid())
+  builderId String
+  name      String
+  type      String
+  channels  String[] @default([])
+  segment   Json?
+  content   Json?
+  schedule  Json?
+  status    String   @default("draft")
+  sent      Int      @default(0)
+  delivered Int      @default(0)
+  opened    Int      @default(0)
+  clicked   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  builder Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+}
+
+model Competitor {
+  id            String    @id @default(cuid())
+  builderId     String
+  name          String
+  location      String?
+  projectName   String?
+  priceMin      Int?
+  priceMax      Int?
+  offers        String[]  @default([])
+  launchDate    DateTime?
+  aiInsights    String?
+  lastTrackedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  builder Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+}
+
+model PilotFeedback {
+  id                  String   @id @default(cuid())
+  builderId           String
+  submittedById       String
+  week                Int?
+  rating              Int?
+  featuresUsed        String[] @default([])
+  featuresNotUsed     String[] @default([])
+  missedFollowUpCause String?
+  painPoints          String[] @default([])
+  suggestions         String?
+  wouldRecommend      Boolean?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  builder     Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  submittedBy User    @relation(fields: [submittedById], references: [id])
+}
+
+model UsageLog {
+  id        String   @id @default(cuid())
+  builderId String
+  userId    String
+  feature   String
+  action    String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  builder Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+}
+
+model AIAlert {
+  id        String   @id @default(cuid())
+  builderId String
+  leadId    String?
+  type      String
+  message   String
+  priority  String   @default("medium")
+  isRead    Boolean  @default(false)
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  builder Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  lead    Lead?   @relation(fields: [leadId], references: [id])
+}
+
+model AIConversation {
+  id        String   @id @default(cuid())
+  builderId String
+  userId    String?
+  leadId    String?
+  type      String
+  messages  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  builder Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id])
+  lead    Lead?   @relation(fields: [leadId], references: [id])
+}
+
+model Complaint {
+  id          String    @id @default(cuid())
+  builderId   String
+  customerId  String
+  bookingId   String?
+  subject     String
+  description String?
+  category    String    @default("other")
+  status      String    @default("open")
+  priority    String    @default("medium")
+  resolution  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  builder  Builder @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  customer User    @relation(fields: [customerId], references: [id])
+}

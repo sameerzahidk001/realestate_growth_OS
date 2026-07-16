@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
+import prisma from '../lib/prisma.js';
+import { formatId } from '../utils/apiFormat.js';
 
 export const protect = async (req, res, next) => {
   try {
@@ -12,13 +13,16 @@ export const protect = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select('-password').populate('builder', 'name');
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      include: { builder: { select: { id: true, name: true, plan: true } } },
+    });
 
     if (!user || !user.isActive) {
       return res.status(401).json({ message: 'User not found or inactive' });
     }
 
-    req.user = user;
+    req.user = formatId(user);
     next();
   } catch {
     return res.status(401).json({ message: 'Not authorized' });
