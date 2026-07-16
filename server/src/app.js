@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { connectDB } from './config/db.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 import authRoutes from './routes/authRoutes.js';
@@ -18,60 +17,57 @@ import customerRoutes from './routes/customerRoutes.js';
 
 const app = express();
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  process.env.CLIENT_URL,
-  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
-].filter(Boolean);
-
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.some((o) => origin === o || origin.endsWith('.vercel.app'))) {
-        callback(null, true);
-      } else {
-        callback(null, true);
-      }
-    },
+    origin: true,
     credentials: true,
   })
 );
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-app.get('/api/health', async (_, res) => {
-  let dbOk = false;
-  try {
-    const { default: prisma } = await import('./lib/prisma.js');
-    await prisma.$queryRaw`SELECT 1`;
-    dbOk = true;
-  } catch {
-    dbOk = false;
-  }
-  res.json({
-    status: 'ok',
-    db: dbOk,
-    engine: 'postgresql',
-    product: "India's First AI Sales Operating System for Real Estate Developers",
-    version: '2.0.0',
+const mountRoutes = (router) => {
+  router.get('/health', async (_, res) => {
+    let dbOk = false;
+    try {
+      const { default: prisma } = await import('./lib/prisma.js');
+      await prisma.$queryRaw`SELECT 1`;
+      dbOk = true;
+    } catch {
+      dbOk = false;
+    }
+    res.json({
+      status: 'ok',
+      db: dbOk,
+      engine: 'postgresql',
+      product: "India's First AI Sales Operating System for Real Estate Developers",
+      version: '2.1.0',
+    });
   });
-});
 
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/leads', leadRoutes);
-app.use('/api/follow-ups', followUpRoutes);
-app.use('/api/site-visits', siteVisitRoutes);
-app.use('/api/projects', projectRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/ai', aiRoutes);
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/marketing', marketingRoutes);
-app.use('/api/customer', customerRoutes);
+  router.use('/auth', authRoutes);
+  router.use('/users', userRoutes);
+  router.use('/leads', leadRoutes);
+  router.use('/follow-ups', followUpRoutes);
+  router.use('/site-visits', siteVisitRoutes);
+  router.use('/projects', projectRoutes);
+  router.use('/dashboard', dashboardRoutes);
+  router.use('/ai', aiRoutes);
+  router.use('/bookings', bookingRoutes);
+  router.use('/marketing', marketingRoutes);
+  router.use('/customer', customerRoutes);
+};
+
+// Support both /api/... and /... (Vercel rewrite can strip /api)
+mountRoutes(app);
+const api = express.Router();
+mountRoutes(api);
+app.use('/api', api);
 
 app.use(errorHandler);
 
 export const initApp = async () => {
+  const { connectDB } = await import('./config/db.js');
   await connectDB();
   return app;
 };
