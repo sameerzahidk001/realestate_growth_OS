@@ -36,26 +36,37 @@ export const register = async (req, res) => {
 };
 
 export const login = async (req, res) => {
-  const { email, password } = req.body;
-  const user = await prisma.user.findUnique({
-    where: { email },
-    include: { builder: { select: { id: true, name: true, plan: true } } },
-  });
+  try {
+    const { email, password } = req.body;
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({ message: 'JWT_SECRET missing on Vercel. Add it in Environment Variables.' });
+    }
 
-  if (!user || !(await matchPassword(password, user.password))) {
-    return res.status(401).json({ message: 'Invalid credentials' });
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: { builder: { select: { id: true, name: true, plan: true } } },
+    });
+
+    if (!user || !(await matchPassword(password, user.password))) {
+      return res.status(401).json({
+        message: 'Invalid email or password. Demo user missing? Click Create account OR wait for auto-seed after redeploy.',
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLogin: new Date() },
+    });
+
+    const token = signToken(user.id);
+    res.json({
+      token,
+      user: formatId(user),
+    });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ message: err.message || 'Login failed', hint: 'Check DATABASE_URL and JWT_SECRET on Vercel' });
   }
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastLogin: new Date() },
-  });
-
-  const token = signToken(user.id);
-  res.json({
-    token,
-    user: formatId(user),
-  });
 };
 
 export const getMe = async (req, res) => {

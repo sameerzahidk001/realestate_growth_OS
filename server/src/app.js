@@ -39,11 +39,21 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-app.get('/api/health', (_, res) => {
+app.get('/api/health', async (_, res) => {
+  let dbOk = false;
+  try {
+    const { default: prisma } = await import('./lib/prisma.js');
+    await prisma.$queryRaw`SELECT 1`;
+    dbOk = true;
+  } catch {
+    dbOk = false;
+  }
   res.json({
     status: 'ok',
+    db: dbOk,
+    engine: 'postgresql',
     product: "India's First AI Sales Operating System for Real Estate Developers",
-    version: '1.0.0',
+    version: '2.0.0',
   });
 });
 

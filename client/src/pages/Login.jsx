@@ -18,14 +18,12 @@ export default function Login() {
       await login(email, password);
       navigate('/');
     } catch (err) {
+      const msg = err.response?.data?.message;
+      const hint = err.response?.data?.hint;
       if (!err.response) {
-        setError(
-          'Cannot connect to API server. Ensure MONGODB_URI and JWT_SECRET are set on Vercel, then redeploy. Or use Create account if database is empty.'
-        );
-      } else if (err.response.status === 401) {
-        setError('Invalid email or password. If first time on Vercel, click Create account or run seed on MongoDB Atlas.');
+        setError('Server timeout / unreachable. Wait for Vercel redeploy to finish, then try again.');
       } else {
-        setError(err.response?.data?.message || err.response?.data?.hint || 'Login failed');
+        setError(hint ? `${msg} (${hint})` : msg || 'Login failed');
       }
     } finally {
       setLoading(false);
