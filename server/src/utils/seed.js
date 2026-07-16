@@ -6,20 +6,26 @@ import { connectDB } from '../config/db.js';
 const seed = async () => {
   await connectDB();
 
-  await prisma.$transaction([
-    prisma.leadActivity.deleteMany(),
-    prisma.followUp.deleteMany(),
-    prisma.siteVisit.deleteMany(),
-    prisma.payment.deleteMany(),
-    prisma.loan.deleteMany(),
-    prisma.possession.deleteMany(),
-    prisma.booking.deleteMany(),
-    prisma.unit.deleteMany(),
-    prisma.lead.deleteMany(),
-    prisma.project.deleteMany(),
-    prisma.user.deleteMany(),
-    prisma.builder.deleteMany(),
-  ]);
+  const existing = await prisma.builder.count();
+  if (existing > 0) {
+    console.log('Database already seeded — skipping.');
+    process.exit(0);
+  }
+
+  console.log('Seeding database...');
+
+  await prisma.leadActivity.deleteMany();
+  await prisma.followUp.deleteMany();
+  await prisma.siteVisit.deleteMany();
+  await prisma.payment.deleteMany();
+  await prisma.loan.deleteMany();
+  await prisma.possession.deleteMany();
+  await prisma.booking.deleteMany();
+  await prisma.unit.deleteMany();
+  await prisma.lead.deleteMany();
+  await prisma.project.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.builder.deleteMany();
 
   const builder = await prisma.builder.create({
     data: {

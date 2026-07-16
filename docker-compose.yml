@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: growth-os-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: growthos
+      POSTGRES_PASSWORD: growthos123
+      POSTGRES_DB: real_estate_growth_os
+    ports:
+      - "5432:5432"
+    volumes:
+      - growth_os_pg_data:/var/lib/postgresql/data
+
+volumes:
+  growth_os_pg_data:
