@@ -2,11 +2,11 @@ import prisma from '../lib/prisma.js';
 
 export const connectDB = async () => {
   const url =
-    process.env.POSTGRES_PRISMA_URL ||
     process.env.DATABASE_URL ||
     process.env.POSTGRES_URL ||
     process.env.DATABASE_URL_UNPOOLED ||
-    process.env.POSTGRES_URL_NON_POOLING;
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.POSTGRES_PRISMA_URL;
 
   if (!url) {
     throw new Error(
@@ -16,15 +16,13 @@ export const connectDB = async () => {
 
   if (!process.env.DATABASE_URL) process.env.DATABASE_URL = url;
 
+  // Neon HTTP adapter: skip $connect(), just run a cheap query
   await Promise.race([
-    (async () => {
-      await prisma.$connect();
-      await prisma.$queryRaw`SELECT 1`;
-    })(),
+    prisma.$queryRaw`SELECT 1`,
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Database connect timeout (15s). Check Neon DATABASE_URL on Vercel.')), 15000)
+      setTimeout(() => reject(new Error('Database query timeout (10s). Check Neon DATABASE_URL on Vercel.')), 10000)
     ),
   ]);
 
-  console.log('PostgreSQL connected');
+  console.log('PostgreSQL connected (Neon HTTP)');
 };

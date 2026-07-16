@@ -1,7 +1,6 @@
 import { PrismaClient } from '@prisma/client';
-import { PrismaNeon } from '@prisma/adapter-neon';
-import { neonConfig, Pool } from '@neondatabase/serverless';
-import ws from 'ws';
+import { PrismaNeonHTTP } from '@prisma/adapter-neon';
+import { neon } from '@neondatabase/serverless';
 
 const globalForPrisma = globalThis;
 
@@ -9,26 +8,21 @@ const getConnectionString = () => {
   const candidates = [
     process.env.DATABASE_URL,
     process.env.POSTGRES_URL,
-    process.env.POSTGRES_PRISMA_URL,
     process.env.DATABASE_URL_UNPOOLED,
     process.env.POSTGRES_URL_NON_POOLING,
+    process.env.POSTGRES_PRISMA_URL,
   ].filter(Boolean);
 
-  // Prefer postgresql:// (skip prisma+postgres accelerate URLs for adapter)
-  const pg = candidates.find((u) => u.startsWith('postgresql://') || u.startsWith('postgres://'));
-  return pg || candidates[0];
+  return candidates.find((u) => u.startsWith('postgresql://') || u.startsWith('postgres://')) || candidates[0];
 };
 
 const createPrismaClient = () => {
   const connectionString = getConnectionString();
 
+  // Vercel: use Neon HTTP adapter (no WebSocket / TCP — fixes 504 timeouts)
   if (connectionString && (process.env.VERCEL || process.env.USE_NEON_ADAPTER === '1')) {
-    // Fetch-based pooling is more reliable on Vercel than raw WebSockets
-    neonConfig.webSocketConstructor = ws;
-    neonConfig.poolQueryViaFetch = true;
-
-    const pool = new Pool({ connectionString });
-    const adapter = new PrismaNeon(pool);
+    const sql = neon(connectionString);
+    const adapter = new PrismaNeonHTTP(sql);
     return new PrismaClient({ adapter });
   }
 
