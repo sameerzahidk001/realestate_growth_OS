@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Upload, Search, Sparkles } from 'lucide-react';
 import api from '../services/api';
-import { StatusBadge, ScoreBadge, formatSource, Modal, paginate, Pagination, ErrorBanner } from '../components/ui';
+import { StatusBadge, ScoreBadge, formatSource, Modal, paginate, Pagination, ErrorBanner, SuccessBanner } from '../components/ui';
 
 export default function Leads() {
   const [leads, setLeads] = useState([]);
@@ -11,7 +11,7 @@ export default function Leads() {
   const [statusFilter, setStatusFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [importMsg, setImportMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [form, setForm] = useState({ name: '', phone: '', email: '', source: 'manual', assignedTo: '' });
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
@@ -36,6 +36,12 @@ export default function Leads() {
     setPage(1);
   }, [search, statusFilter, leads.length]);
 
+  useEffect(() => {
+    if (!successMsg) return undefined;
+    const timer = setTimeout(() => setSuccessMsg(''), 5000);
+    return () => clearTimeout(timer);
+  }, [successMsg]);
+
   const handleCreate = async (e) => {
     e.preventDefault();
     setError('');
@@ -57,12 +63,12 @@ export default function Leads() {
     if (!file) return;
     setImporting(true);
     setError('');
-    setImportMsg('');
+    setSuccessMsg('');
     try {
       const csv = await file.text();
       const { data } = await api.post('/leads/import', { csv });
       loadLeads();
-      setImportMsg(`${data.imported} lead(s) imported${data.skipped ? `, ${data.skipped} row(s) skipped` : ''}`);
+      setSuccessMsg(`${data.imported} lead(s) imported${data.skipped ? `, ${data.skipped} row(s) skipped` : ''}`);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to import CSV');
     } finally {
@@ -112,9 +118,11 @@ export default function Leads() {
   const handleDelete = async (lead) => {
     if (!window.confirm(`Delete lead "${lead.name}"?`)) return;
     setError('');
+    setSuccessMsg('');
     try {
       await api.delete(`/leads/${lead._id}`);
       loadLeads();
+      setSuccessMsg(`Lead "${lead.name}" deleted successfully`);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to delete lead');
     }
@@ -143,9 +151,7 @@ export default function Leads() {
       </div>
 
       <ErrorBanner message={error && !showModal && !showEditModal ? error : ''} />
-      {importMsg && (
-        <div className="p-3 bg-green-50 text-green-700 rounded-lg text-sm">{importMsg}</div>
-      )}
+      <SuccessBanner message={successMsg} />
 
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">

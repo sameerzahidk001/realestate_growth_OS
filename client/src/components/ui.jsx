@@ -74,6 +74,9 @@ export const isValidDatetimeLocal = (value) => {
 export const ErrorBanner = ({ message }) =>
   message ? <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{message}</div> : null;
 
+export const SuccessBanner = ({ message }) =>
+  message ? <div className="p-3 bg-green-50 text-green-700 rounded-lg text-sm">{message}</div> : null;
+
 export const STAGES = [
   { key: 'new', label: 'New', color: 'border-blue-400' },
   { key: 'contacted', label: 'Contacted', color: 'border-cyan-400' },
