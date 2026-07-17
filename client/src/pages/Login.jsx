@@ -3,6 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 
+const homeForRole = (role) => {
+  if (role === 'super_admin') return '/admin';
+  if (role === 'customer') return '/customer';
+  return '/';
+};
+
 export default function Login() {
   const [email, setEmail] = useState('owner@skyline.com');
   const [password, setPassword] = useState('password123');
@@ -19,8 +25,8 @@ export default function Login() {
     setInfo('');
     setLoading(true);
     try {
-      await login(email, password);
-      navigate('/');
+      const data = await login(email, password);
+      navigate(homeForRole(data.user?.role));
     } catch (err) {
       const msg = err.response?.data?.message;
       const hint = err.response?.data?.hint;
@@ -40,9 +46,7 @@ export default function Login() {
     setResetting(true);
     try {
       const { data } = await api.post('/auth/reset-demo');
-      setEmail('owner@skyline.com');
-      setPassword('password123');
-      setInfo(data.message || 'Demo password reset. Ab Sign in dabao.');
+      setInfo(data.message || 'Demo accounts ready. Sign in dabao.');
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to reset demo login');
     } finally {
@@ -62,7 +66,7 @@ export default function Login() {
             India's First AI Sales Operating System for Real Estate Developers
           </p>
           <p className="mt-8 text-brand-300 text-sm">
-            Lead → Follow-up → Pipeline → Booking — all in one platform
+            Super Admin Panel + Company Panel — all in one platform
           </p>
         </div>
       </div>
@@ -90,7 +94,7 @@ export default function Login() {
           </form>
 
           <p className="mt-6 text-center text-sm text-slate-500">
-            New builder?{' '}
+            New builder company?{' '}
             <Link to="/register" className="text-brand-600 font-medium hover:underline">
               Create account
             </Link>
@@ -98,7 +102,11 @@ export default function Login() {
 
           <div className="mt-8 p-4 bg-slate-50 rounded-lg text-xs text-slate-500 space-y-3">
             <div>
-              <p className="font-medium text-slate-700 mb-1">Demo credentials:</p>
+              <p className="font-medium text-slate-700 mb-1">Super Admin (platform):</p>
+              <p>superadmin@avrgrowthos.com / password123</p>
+            </div>
+            <div>
+              <p className="font-medium text-slate-700 mb-1">Company Owner (Skyline):</p>
               <p>owner@skyline.com / password123</p>
             </div>
             <button
@@ -107,7 +115,7 @@ export default function Login() {
               disabled={resetting}
               className="btn-secondary w-full text-xs py-2"
             >
-              {resetting ? 'Resetting...' : 'Reset demo password'}
+              {resetting ? 'Resetting...' : 'Reset demo passwords'}
             </button>
           </div>
         </div>

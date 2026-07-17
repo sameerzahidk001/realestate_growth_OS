@@ -46,7 +46,42 @@ const DEMO_USERS = [
   { email: 'amit@skyline.com', name: 'Amit Singh', role: 'sales_executive' },
 ];
 
+const SUPER_ADMIN_EMAIL = 'superadmin@avrgrowthos.com';
+
+const ensureSchema = async (sql) => {
+  // Allow platform super_admin users without a company
+  await sql`ALTER TABLE "User" ALTER COLUMN "builderId" DROP NOT NULL`.catch(() => {});
+};
+
+const ensureSuperAdmin = async (sql) => {
+  await ensureSchema(sql);
+  const hashed = await bcrypt.hash('password123', 12);
+  const now = new Date();
+  const existing = await sql`SELECT id FROM "User" WHERE lower(email) = ${SUPER_ADMIN_EMAIL} LIMIT 1`;
+  if (existing.length) {
+    await sql`
+      UPDATE "User"
+      SET password = ${hashed}, role = ${'super_admin'}, "builderId" = NULL, "isActive" = true, "updatedAt" = ${now}
+      WHERE id = ${existing[0].id}
+    `;
+    return { email: SUPER_ADMIN_EMAIL, action: 'updated' };
+  }
+  const userId = cuid();
+  await sql`
+    INSERT INTO "User" (
+      id, name, email, password, phone, role, "builderId", "isActive",
+      "leadsAssigned", "leadsConverted", "siteVisitsCompleted", "createdAt", "updatedAt"
+    )
+    VALUES (
+      ${userId}, ${'AVR Super Admin'}, ${SUPER_ADMIN_EMAIL}, ${hashed}, ${null}, ${'super_admin'},
+      ${null}, true, 0, 0, 0, ${now}, ${now}
+    )
+  `;
+  return { email: SUPER_ADMIN_EMAIL, action: 'created' };
+};
+
 const ensureDemoUsers = async (sql) => {
+  await ensureSchema(sql);
   const hashed = await bcrypt.hash('password123', 12);
   const now = new Date();
   let builders = await sql`SELECT id, name FROM "Builder" ORDER BY "createdAt" ASC LIMIT 1`;
@@ -87,6 +122,9 @@ const ensureDemoUsers = async (sql) => {
     }
   }
 
+  const superAdmin = await ensureSuperAdmin(sql);
+  ensured.push({ ...superAdmin, role: 'super_admin' });
+
   return { builderId, builderName, ensured };
 };
 
@@ -102,11 +140,17 @@ const handleAuthDirect = async (req, res, path) => {
     const sql = getSql();
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const enteredPassword = String(password || '');
-    const isDemoLogin = DEMO_USERS.some((d) => d.email === normalizedEmail) && enteredPassword === 'password123';
+    const isCompanyDemo = DEMO_USERS.some((d) => d.email === normalizedEmail) && enteredPassword === 'password123';
+    const isSuperDemo = normalizedEmail === SUPER_ADMIN_EMAIL && enteredPassword === 'password123';
+    const isDemoLogin = isCompanyDemo || isSuperDemo;
 
     // If demo credentials: ensure users exist with correct password first
     if (isDemoLogin) {
-      await ensureDemoUsers(sql);
+      if (isSuperDemo) {
+        await ensureSuperAdmin(sql);
+      } else {
+        await ensureDemoUsers(sql);
+      }
     }
 
     const rows = await sql`
@@ -158,13 +202,15 @@ const handleAuthDirect = async (req, res, path) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        builderId: user.builderId,
-        builder: {
-          id: user.builder_id,
-          _id: user.builder_id,
-          name: user.builder_name,
-          plan: user.builder_plan,
-        },
+        builderId: user.builderId || null,
+        builder: user.builder_id
+          ? {
+              id: user.builder_id,
+              _id: user.builder_id,
+              name: user.builder_name,
+              plan: user.builder_plan,
+            }
+          : null,
       },
     });
   }
@@ -212,9 +258,12 @@ const handleAuthDirect = async (req, res, path) => {
     const sql = getSql();
     const result = await ensureDemoUsers(sql);
     return json(res, 200, {
-      message: 'Demo users ready. Login with owner@skyline.com / password123',
+      message: 'Demo users ready. Super Admin: superadmin@avrgrowthos.com / password123 | Company: owner@skyline.com / password123',
       ...result,
-      login: 'owner@skyline.com / password123',
+      login: {
+        superAdmin: 'superadmin@avrgrowthos.com / password123',
+        companyOwner: 'owner@skyline.com / password123',
+      },
     });
   }
 
@@ -249,6 +298,7 @@ export default async function apiHandler(req, res) {
       try {
         const sql = neon(url);
         await sql`SELECT 1 as ok`;
+        await sql`ALTER TABLE "User" ALTER COLUMN "builderId" DROP NOT NULL`.catch(() => {});
         dbPing = true;
         const rows = await sql`SELECT COUNT(*)::int as c FROM "User"`;
         userCount = rows[0]?.c ?? 0;
@@ -258,7 +308,7 @@ export default async function apiHandler(req, res) {
     }
     return json(res, 200, {
       status: 'ok',
-      version: '2.9.8',
+      version: '3.0.0',
       engine: 'postgresql-neon-http',
       dbConfigured: Boolean(url),
       dbPing,

@@ -104,6 +104,12 @@ const ROUTES = [
 
   { match: /^\/auth\/me$/, methods: { GET: ['auth', 'getMe'] } },
 
+  { match: /^\/admin\/stats$/, methods: { GET: ['admin', 'getAdminStats'] }, roles: ['super_admin'] },
+  { match: /^\/admin\/companies\/([^/]+)\/status$/, params: ['id'], methods: { PATCH: ['admin', 'updateCompanyStatus'] }, roles: ['super_admin'] },
+  { match: /^\/admin\/companies\/([^/]+)\/users$/, params: ['id'], methods: { GET: ['admin', 'getCompanyUsers'] }, roles: ['super_admin'] },
+  { match: /^\/admin\/companies\/([^/]+)$/, params: ['id'], methods: { PUT: ['admin', 'updateCompany'] }, roles: ['super_admin'] },
+  { match: /^\/admin\/companies$/, methods: { GET: ['admin', 'getCompanies'], POST: ['admin', 'createCompany'] }, roles: ['super_admin'] },
+
   { match: /^\/leads\/pipeline$/, methods: { GET: ['lead', 'getPipeline'] } },
   { match: /^\/leads\/import$/, methods: { POST: ['lead', 'importLeads'] } },
   { match: /^\/leads\/([^/]+)\/ai-qualify$/, params: ['id'], methods: { POST: ['lead', 'aiQualifyLead'] } },
@@ -120,6 +126,7 @@ const CONTROLLERS = {
   project: () => import('../server/src/controllers/projectController.js'),
   user: () => import('../server/src/controllers/userController.js'),
   lead: () => import('../server/src/controllers/leadController.js'),
+  admin: () => import('../server/src/controllers/adminController.js'),
 };
 
 const matchRoute = (pathname) => {
@@ -165,6 +172,17 @@ export const handlePhase1Direct = async (req, res, path, jsonFn) => {
       return true;
     }
 
+    // Super admin cannot use company-scoped Phase 1 APIs
+    const cleanPath = pathname.replace(/^\/api/, '') || '/';
+    if (
+      user.role === 'super_admin' &&
+      !cleanPath.startsWith('/admin') &&
+      cleanPath !== '/auth/me'
+    ) {
+      jsonFn(res, 403, { message: 'Use Super Admin panel for platform management' });
+      return true;
+    }
+
     req.user = user;
 
     if (controllerName === 'auth' && actionName === 'getMe') {
@@ -204,6 +222,7 @@ export const isPhase1Path = (path) => {
     '/follow-ups',
     '/site-visits',
     '/projects',
+    '/admin',
   ];
   return prefixes.some((p) => clean === p || clean.startsWith(`${p}/`));
 };

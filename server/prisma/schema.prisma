@@ -55,7 +55,7 @@ model User {
   password             String
   phone                String?
   role                 String    @default("sales_executive")
-  builderId            String
+  builderId            String?
   isActive             Boolean   @default(true)
   lastLogin            DateTime?
   leadsAssigned        Int       @default(0)
@@ -64,7 +64,7 @@ model User {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  builder      Builder    @relation(fields: [builderId], references: [id], onDelete: Cascade)
+  builder      Builder?   @relation(fields: [builderId], references: [id], onDelete: Cascade)
   assignedLeads Lead[]    @relation("AssignedLeads")
   followUps    FollowUp[]
   siteVisits   SiteVisit[]
