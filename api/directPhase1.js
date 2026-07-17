@@ -110,6 +110,9 @@ const ROUTES = [
   { match: /^\/admin\/companies\/([^/]+)$/, params: ['id'], methods: { PUT: ['admin', 'updateCompany'] }, roles: ['super_admin'] },
   { match: /^\/admin\/companies$/, methods: { GET: ['admin', 'getCompanies'], POST: ['admin', 'createCompany'] }, roles: ['super_admin'] },
 
+  { match: /^\/marketing\/pilot-feedback$/, methods: { GET: ['pilot', 'getPilotFeedback'], POST: ['pilot', 'submitPilotFeedback'] } },
+  { match: /^\/marketing\/usage$/, methods: { GET: ['pilot', 'getUsageStats'], POST: ['pilot', 'logUsage'] } },
+
   { match: /^\/leads\/pipeline$/, methods: { GET: ['lead', 'getPipeline'] } },
   { match: /^\/leads\/import$/, methods: { POST: ['lead', 'importLeads'] } },
   { match: /^\/leads\/([^/]+)\/ai-qualify$/, params: ['id'], methods: { POST: ['lead', 'aiQualifyLead'] } },
@@ -127,6 +130,7 @@ const CONTROLLERS = {
   user: () => import('../server/src/controllers/userController.js'),
   lead: () => import('../server/src/controllers/leadController.js'),
   admin: () => import('../server/src/controllers/adminController.js'),
+  pilot: () => import('../server/src/controllers/pilotController.js'),
 };
 
 const matchRoute = (pathname) => {
@@ -223,6 +227,8 @@ export const isPhase1Path = (path) => {
     '/site-visits',
     '/projects',
     '/admin',
+    '/marketing/pilot-feedback',
+    '/marketing/usage',
   ];
   return prefixes.some((p) => clean === p || clean.startsWith(`${p}/`));
 };

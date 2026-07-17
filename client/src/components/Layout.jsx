@@ -19,24 +19,30 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
 
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard', phase: 1 },
-  { to: '/leads', icon: Users, label: 'Leads', phase: 1 },
-  { to: '/pipeline', icon: Kanban, label: 'Pipeline', phase: 1 },
-  { to: '/follow-ups', icon: Phone, label: 'Follow-ups', phase: 1 },
-  { to: '/site-visits', icon: MapPin, label: 'Site Visits', phase: 1 },
-  { to: '/projects', icon: Building2, label: 'Projects', phase: 1 },
-  { to: '/bookings', icon: FileText, label: 'Bookings', phase: 7 },
-  { to: '/ai', icon: Sparkles, label: 'AI Hub', phase: 3 },
-  { to: '/marketing', icon: Megaphone, label: 'Marketing', phase: 5 },
-  { to: '/landing-pages', icon: Globe, label: 'Landing Pages', phase: 5 },
-  { to: '/reports', icon: BarChart3, label: 'Reports', phase: 1 },
-  { to: '/pilot', icon: ClipboardCheck, label: 'Pilot Feedback', phase: 2 },
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard', phase: 1, feature: 'dashboard' },
+  { to: '/leads', icon: Users, label: 'Leads', phase: 1, feature: 'leads' },
+  { to: '/pipeline', icon: Kanban, label: 'Pipeline', phase: 1, feature: 'pipeline' },
+  { to: '/follow-ups', icon: Phone, label: 'Follow-ups', phase: 1, feature: 'follow_ups' },
+  { to: '/site-visits', icon: MapPin, label: 'Site Visits', phase: 1, feature: 'site_visits' },
+  { to: '/projects', icon: Building2, label: 'Projects', phase: 1, feature: 'projects' },
+  { to: '/bookings', icon: FileText, label: 'Bookings', phase: 7, feature: 'bookings' },
+  { to: '/ai', icon: Sparkles, label: 'AI Hub', phase: 3, feature: 'ai_hub' },
+  { to: '/marketing', icon: Megaphone, label: 'Marketing', phase: 5, feature: 'marketing' },
+  { to: '/landing-pages', icon: Globe, label: 'Landing Pages', phase: 5, feature: 'landing_pages' },
+  { to: '/reports', icon: BarChart3, label: 'Reports', phase: 1, feature: 'reports' },
+  { to: '/pilot', icon: ClipboardCheck, label: 'Pilot Feedback', phase: 2, feature: 'pilot_feedback' },
 ];
 
 const demoPhase = Number(import.meta.env.VITE_DEMO_PHASE) || 0;
 const visibleNavItems = demoPhase > 0 ? navItems.filter((item) => item.phase <= demoPhase) : navItems;
+
+const trackUsage = (feature) => {
+  if (!feature) return;
+  api.post('/marketing/usage', { feature, action: 'navigate' }).catch(() => {});
+};
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -65,12 +71,15 @@ export default function Layout() {
         </div>
 
         <nav className="p-4 space-y-1 overflow-y-auto max-h-[calc(100vh-180px)]">
-          {visibleNavItems.map(({ to, icon: Icon, label }) => (
+          {visibleNavItems.map(({ to, icon: Icon, label, feature }) => (
             <NavLink
               key={to}
               to={to}
               end={to === '/'}
-              onClick={() => setSidebarOpen(false)}
+              onClick={() => {
+                setSidebarOpen(false);
+                trackUsage(feature);
+              }}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   isActive
@@ -86,7 +95,10 @@ export default function Layout() {
           {['owner', 'sales_manager'].includes(user?.role) && (
             <NavLink
               to="/users"
-              onClick={() => setSidebarOpen(false)}
+              onClick={() => {
+                setSidebarOpen(false);
+                trackUsage('team');
+              }}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   isActive ? 'bg-brand-600 text-white' : 'text-brand-200 hover:bg-white/10'

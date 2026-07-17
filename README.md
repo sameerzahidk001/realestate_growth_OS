@@ -108,7 +108,8 @@ real-estate-growth-os/
 
 ## Roles
 
-- **owner** — Full access
+- **super_admin** — Platform panel (all companies)
+- **owner** — Full company access
 - **sales_manager** — Team + all leads
 - **sales_executive** — Own leads only
 - **customer** — Customer portal access

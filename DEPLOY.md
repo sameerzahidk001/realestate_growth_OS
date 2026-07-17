@@ -19,7 +19,7 @@ Vercel → Project → **Settings → Environment Variables**
 | `JWT_SECRET` | `growthos_secret_key_2026_random` |
 | `JWT_EXPIRE` | `7d` |
 | `CLIENT_URL` | `https://realestate-growth-os.vercel.app` |
-| `VITE_DEMO_PHASE` | `1` |
+| `VITE_DEMO_PHASE` | `2` |
 
 **Remove old `MONGODB_URI` if it exists.**
 
