@@ -26,7 +26,7 @@ export default function PublicLanding() {
     <div className="min-h-screen bg-gradient-to-b from-brand-950 via-brand-900 to-brand-950 text-white">
       <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=1600&q=80')] bg-cover bg-center opacity-20" />
       <div className="relative z-10 max-w-4xl mx-auto px-6 py-20 text-center">
-        <p className="text-accent-400 font-medium mb-4">GrowthOS Landing</p>
+        <p className="text-accent-400 font-medium mb-4">AVR Growth OS Landing</p>
         <h1 className="font-display text-4xl md:text-5xl font-bold mb-4">
           {hero?.content?.headline || page.title}
         </h1>

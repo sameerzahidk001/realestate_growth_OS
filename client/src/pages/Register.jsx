@@ -35,7 +35,7 @@ export default function Register() {
     <div className="min-h-screen flex items-center justify-center p-8 bg-gradient-to-br from-brand-50 to-slate-100">
       <div className="card w-full max-w-lg p-8">
         <h2 className="font-display text-2xl font-bold mb-2">Start your pilot</h2>
-        <p className="text-slate-500 mb-6">Register your builder company on GrowthOS</p>
+        <p className="text-slate-500 mb-6">Register your builder company on AVR Growth OS</p>
 
         {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
 

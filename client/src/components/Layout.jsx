@@ -57,7 +57,7 @@ export default function Layout() {
       >
         <div className="p-6 border-b border-white/10">
           <h1 className="font-display text-xl font-bold tracking-tight">
-            Growth<span className="text-accent-400">OS</span>
+            AVR Growth<span className="text-accent-400">OS</span>
           </h1>
           <p className="text-xs text-brand-300 mt-1 leading-snug">
             AI Sales OS for Real Estate Developers
@@ -128,7 +128,7 @@ export default function Layout() {
           <button onClick={() => setSidebarOpen(true)}>
             <Menu size={24} />
           </button>
-          <span className="font-display font-bold text-brand-700">GrowthOS</span>
+          <span className="font-display font-bold text-brand-700">AVR GrowthOS</span>
           <button onClick={() => setSidebarOpen(false)} className="invisible">
             <X size={24} />
           </button>

@@ -50,15 +50,22 @@ const handleAuthDirect = async (req, res, path) => {
       return json(res, 500, { message: 'JWT_SECRET missing on Vercel' });
     }
     const sql = getSql();
+    const normalizedEmail = String(email || '').trim().toLowerCase();
     const rows = await sql`
       SELECT u.*, b.id as builder_id, b.name as builder_name, b.plan as builder_plan
       FROM "User" u
       LEFT JOIN "Builder" b ON b.id = u."builderId"
-      WHERE u.email = ${email}
+      WHERE lower(u.email) = ${normalizedEmail}
       LIMIT 1
     `;
     const user = rows[0];
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (!user) {
+      return json(res, 401, { message: 'Invalid email or password. Try Create account.' });
+    }
+    if (user.isActive === false) {
+      return json(res, 401, { message: 'Account is deactivated. Contact admin or reset demo login.' });
+    }
+    if (!(await bcrypt.compare(String(password || ''), user.password))) {
       return json(res, 401, { message: 'Invalid email or password. Try Create account.' });
     }
     await sql`UPDATE "User" SET "lastLogin" = ${new Date()}, "updatedAt" = ${new Date()} WHERE id = ${user.id}`;
@@ -122,6 +129,35 @@ const handleAuthDirect = async (req, res, path) => {
     });
   }
 
+  // Reset known demo accounts (password may have been changed via Team edit)
+  if (path.endsWith('/auth/reset-demo') && method === 'POST') {
+    const sql = getSql();
+    const hashed = await bcrypt.hash('password123', 12);
+    const now = new Date();
+    const demos = [
+      'owner@skyline.com',
+      'manager@skyline.com',
+      'amit@skyline.com',
+    ];
+    const reset = [];
+    for (const email of demos) {
+      const rows = await sql`
+        UPDATE "User"
+        SET password = ${hashed}, "isActive" = true, "updatedAt" = ${now}
+        WHERE lower(email) = ${email}
+        RETURNING id, email, role
+      `;
+      if (rows.length) reset.push({ email: rows[0].email, role: rows[0].role });
+    }
+    return json(res, 200, {
+      message: reset.length
+        ? 'Demo passwords reset to password123'
+        : 'No demo users found. Use Create account or run seed.',
+      reset,
+      login: 'owner@skyline.com / password123',
+    });
+  }
+
   return false;
 };
 
@@ -162,7 +198,7 @@ export default async function apiHandler(req, res) {
     }
     return json(res, 200, {
       status: 'ok',
-      version: '2.9.5',
+      version: '2.9.6',
       engine: 'postgresql-neon-http',
       dbConfigured: Boolean(url),
       dbPing,
@@ -178,7 +214,11 @@ export default async function apiHandler(req, res) {
   }
 
   // Auth without loading Prisma/Express (avoids serverless hang)
-  if (path.includes('/auth/login') || path.includes('/auth/register')) {
+  if (
+    path.includes('/auth/login') ||
+    path.includes('/auth/register') ||
+    path.includes('/auth/reset-demo')
+  ) {
     try {
       const handled = await handleAuthDirect(req, res, path);
       if (handled !== false) return;

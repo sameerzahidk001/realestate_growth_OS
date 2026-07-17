@@ -25,7 +25,7 @@ export default function CustomerPortal() {
       <header className="bg-brand-950 text-white p-6">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
           <div>
-            <h1 className="font-display text-xl font-bold">Growth<span className="text-accent-400">OS</span> Customer</h1>
+            <h1 className="font-display text-xl font-bold">AVR Growth<span className="text-accent-400">OS</span> Customer</h1>
             <p className="text-sm text-brand-300">Welcome, {user?.name}</p>
           </div>
           <button onClick={logout} className="text-sm text-brand-200 hover:text-white">Sign out</button>
