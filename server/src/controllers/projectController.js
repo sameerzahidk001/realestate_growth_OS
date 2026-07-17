@@ -118,15 +118,25 @@ export const updateProject = async (req, res) => {
     `;
     if (!existing.length) return res.status(404).json({ message: 'Project not found' });
 
+    const amenities = Array.isArray(req.body.amenities)
+      ? req.body.amenities
+      : typeof req.body.amenities === 'string'
+        ? req.body.amenities.split(',').map((a) => a.trim()).filter(Boolean)
+        : null;
+    const totalUnits = req.body.totalUnits != null && req.body.totalUnits !== ''
+      ? Number(req.body.totalUnits)
+      : null;
+
     await sql`
       UPDATE "Project"
       SET
         name = COALESCE(${req.body.name ?? null}, name),
         location = COALESCE(${req.body.location ?? null}, location),
         city = COALESCE(${req.body.city ?? null}, city),
-        "totalUnits" = COALESCE(${req.body.totalUnits ?? null}, "totalUnits"),
+        "totalUnits" = COALESCE(${totalUnits}, "totalUnits"),
         description = COALESCE(${req.body.description ?? null}, description),
         status = COALESCE(${req.body.status ?? null}, status),
+        amenities = COALESCE(${amenities}, amenities),
         "updatedAt" = ${now}
       WHERE id = ${req.params.id}
     `;

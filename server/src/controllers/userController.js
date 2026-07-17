@@ -25,6 +25,13 @@ export const createUser = async (req, res) => {
     const { name, email, password, phone, role } = req.body;
     const builderId = getBuilderId(req.user);
 
+    if (!name?.trim() || !email?.trim()) {
+      return res.status(400).json({ message: 'Name and email are required' });
+    }
+    if (!password?.trim()) {
+      return res.status(400).json({ message: 'Password is required' });
+    }
+
     const existing = await sql`SELECT id FROM "User" WHERE email = ${email} LIMIT 1`;
     if (existing.length) return res.status(400).json({ message: 'Email already exists' });
 
@@ -60,13 +67,21 @@ export const updateUser = async (req, res) => {
     const builderId = getBuilderId(req.user);
     const { password, ...data } = req.body;
     const now = new Date();
+    const newPassword = password?.trim() ? password : null;
 
     const existing = await sql`
       SELECT id FROM "User" WHERE id = ${req.params.id} AND "builderId" = ${builderId} LIMIT 1
     `;
     if (!existing.length) return res.status(404).json({ message: 'User not found' });
 
-    const hashed = password ? await hashPassword(password) : null;
+    if (data.email) {
+      const duplicate = await sql`
+        SELECT id FROM "User" WHERE email = ${data.email} AND id <> ${req.params.id} LIMIT 1
+      `;
+      if (duplicate.length) return res.status(400).json({ message: 'Email already exists' });
+    }
+
+    const hashed = newPassword ? await hashPassword(newPassword) : null;
 
     await sql`
       UPDATE "User"

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Upload, Search, Sparkles } from 'lucide-react';
 import api from '../services/api';
-import { StatusBadge, ScoreBadge, formatSource, Modal, paginate, Pagination } from '../components/ui';
+import { StatusBadge, ScoreBadge, formatSource, Modal, paginate, Pagination, ErrorBanner } from '../components/ui';
 
 export default function Leads() {
   const [leads, setLeads] = useState([]);
@@ -129,6 +129,8 @@ export default function Leads() {
           </button>
         </div>
       </div>
+
+      <ErrorBanner message={error && !showModal && !showEditModal ? error : ''} />
 
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">

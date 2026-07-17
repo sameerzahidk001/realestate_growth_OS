@@ -107,7 +107,13 @@ export const createFollowUp = async (req, res) => {
     const userId = getUserId(req.user);
     const id = cuid();
     const now = new Date();
+
+    if (!req.body.lead) return res.status(400).json({ message: 'Please select a lead' });
     const scheduledAt = new Date(req.body.scheduledAt);
+    if (!req.body.scheduledAt || Number.isNaN(scheduledAt.getTime())) {
+      return res.status(400).json({ message: 'Please select both date and time' });
+    }
+
     const assignedToId = req.body.assignedTo || userId;
 
     await sql`
@@ -182,11 +188,21 @@ export const updateFollowUp = async (req, res) => {
     `;
     if (!existing.length) return res.status(404).json({ message: 'Follow-up not found' });
 
+    if (req.body.scheduledAt) {
+      const scheduledAtCheck = new Date(req.body.scheduledAt);
+      if (Number.isNaN(scheduledAtCheck.getTime())) {
+        return res.status(400).json({ message: 'Please select both date and time' });
+      }
+    }
+
+    const leadId = req.body.lead || null;
+    const assignedToId = req.body.assignedTo || null;
+
     await sql`
       UPDATE "FollowUp"
       SET
-        "leadId" = COALESCE(${req.body.lead ?? null}, "leadId"),
-        "assignedToId" = COALESCE(${req.body.assignedTo ?? null}, "assignedToId"),
+        "leadId" = COALESCE(${leadId}, "leadId"),
+        "assignedToId" = COALESCE(${assignedToId}, "assignedToId"),
         "scheduledAt" = COALESCE(${scheduledAt}, "scheduledAt"),
         type = COALESCE(${req.body.type ?? null}, type),
         notes = COALESCE(${req.body.notes ?? null}, notes),

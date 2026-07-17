@@ -56,6 +56,24 @@ export const formatDateTime = (date) =>
       })
     : '—';
 
+export const toDatetimeLocalValue = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+export const isValidDatetimeLocal = (value) => {
+  if (!value || !value.includes('T')) return false;
+  const [, timePart] = value.split('T');
+  if (!timePart || timePart.includes('--')) return false;
+  return !Number.isNaN(new Date(value).getTime());
+};
+
+export const ErrorBanner = ({ message }) =>
+  message ? <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{message}</div> : null;
+
 export const STAGES = [
   { key: 'new', label: 'New', color: 'border-blue-400' },
   { key: 'contacted', label: 'Contacted', color: 'border-cyan-400' },

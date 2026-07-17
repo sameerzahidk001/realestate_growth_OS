@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Building2 } from 'lucide-react';
 import api from '../services/api';
-import { Modal, Pagination, formatCurrency, paginate } from '../components/ui';
+import { Modal, Pagination, formatCurrency, paginate, ErrorBanner } from '../components/ui';
 
 export default function Projects() {
   const [projects, setProjects] = useState([]);
@@ -10,24 +10,39 @@ export default function Projects() {
   const [form, setForm] = useState({ name: '', location: '', city: '', totalUnits: '', amenities: '' });
   const [editId, setEditId] = useState('');
   const [page, setPage] = useState(1);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const load = () => api.get('/projects').then((res) => setProjects(res.data));
 
   useEffect(() => { load(); }, []);
 
+  const resetForm = () => {
+    setEditId('');
+    setForm({ name: '', location: '', city: '', totalUnits: '', amenities: '' });
+    setError('');
+  };
+
   const handleCreate = async (e) => {
     e.preventDefault();
+    setError('');
+    setSubmitting(true);
     const payload = {
       ...form,
       totalUnits: Number(form.totalUnits) || 0,
       amenities: form.amenities.split(',').map((a) => a.trim()).filter(Boolean),
     };
-    if (editId) await api.put(`/projects/${editId}`, payload);
-    else await api.post('/projects', payload);
-    setShowModal(false);
-    setEditId('');
-    setForm({ name: '', location: '', city: '', totalUnits: '', amenities: '' });
-    load();
+    try {
+      if (editId) await api.put(`/projects/${editId}`, payload);
+      else await api.post('/projects', payload);
+      setShowModal(false);
+      resetForm();
+      load();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to save project');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const openEdit = (project) => {
@@ -39,13 +54,19 @@ export default function Projects() {
       totalUnits: String(project.totalUnits || ''),
       amenities: (project.amenities || []).join(', '),
     });
+    setError('');
     setShowModal(true);
   };
 
   const handleDelete = async (project) => {
     if (!window.confirm(`Delete project "${project.name}"?`)) return;
-    await api.delete(`/projects/${project._id}`);
-    load();
+    setError('');
+    try {
+      await api.delete(`/projects/${project._id}`);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete project');
+    }
   };
 
   const paged = useMemo(() => paginate(projects, page, 8), [projects, page]);
@@ -57,10 +78,19 @@ export default function Projects() {
           <h1 className="font-display text-2xl font-bold">Projects</h1>
           <p className="text-slate-500 text-sm">Manage projects and inventory</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="btn-primary">
+        <button
+          onClick={() => {
+            resetForm();
+            setShowModal(true);
+          }}
+          className="btn-primary"
+          type="button"
+        >
           <Plus size={16} /> Add Project
         </button>
       </div>
+
+      <ErrorBanner message={error && !showModal ? error : ''} />
 
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
         {paged.items.map((p) => (
@@ -89,8 +119,9 @@ export default function Projects() {
         <Pagination page={paged.page} totalPages={paged.totalPages} total={paged.total} onPageChange={setPage} />
       </div>
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditId(''); }} title={editId ? 'Edit Project' : 'Add Project'}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); resetForm(); }} title={editId ? 'Edit Project' : 'Add Project'}>
         <form onSubmit={handleCreate} className="space-y-4">
+          <ErrorBanner message={error} />
           <div>
             <label className="label">Project Name</label>
             <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
@@ -111,7 +142,9 @@ export default function Projects() {
             <label className="label">Amenities (comma separated)</label>
             <input className="input" value={form.amenities} onChange={(e) => setForm({ ...form, amenities: e.target.value })} placeholder="Pool, Gym, Club House" />
           </div>
-          <button type="submit" className="btn-primary w-full">{editId ? 'Save Changes' : 'Create Project'}</button>
+          <button type="submit" className="btn-primary w-full" disabled={submitting}>
+            {submitting ? 'Saving...' : editId ? 'Save Changes' : 'Create Project'}
+          </button>
         </form>
       </Modal>
     </div>

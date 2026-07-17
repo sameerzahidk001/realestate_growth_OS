@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import api from '../services/api';
-import { Modal, Pagination, formatDateTime, paginate } from '../components/ui';
+import {
+  Modal,
+  Pagination,
+  formatDateTime,
+  paginate,
+  toDatetimeLocalValue,
+  isValidDatetimeLocal,
+  ErrorBanner,
+} from '../components/ui';
 
 export default function FollowUps() {
   const [followUps, setFollowUps] = useState([]);
@@ -11,6 +19,8 @@ export default function FollowUps() {
   const [form, setForm] = useState({ lead: '', scheduledAt: '', type: 'call', notes: '' });
   const [editId, setEditId] = useState('');
   const [page, setPage] = useState(1);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const load = () => api.get('/follow-ups').then((res) => setFollowUps(res.data));
 
@@ -19,21 +29,42 @@ export default function FollowUps() {
     api.get('/leads').then((res) => setLeads(res.data));
   }, []);
 
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    if (editId) await api.put(`/follow-ups/${editId}`, form);
-    else await api.post('/follow-ups', form);
-    setShowModal(false);
+  const resetForm = () => {
     setEditId('');
     setForm({ lead: '', scheduledAt: '', type: 'call', notes: '' });
-    load();
+    setError('');
+  };
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (!isValidDatetimeLocal(form.scheduledAt)) {
+      setError('Please select both date and time');
+      return;
+    }
+    setError('');
+    setSubmitting(true);
+    try {
+      if (editId) await api.put(`/follow-ups/${editId}`, form);
+      else await api.post('/follow-ups', form);
+      setShowModal(false);
+      resetForm();
+      load();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to save follow-up');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const complete = async (id) => {
     const summary = prompt('Follow-up summary:');
-    if (summary) {
+    if (!summary) return;
+    setError('');
+    try {
       await api.patch(`/follow-ups/${id}/complete`, { summary });
       load();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to complete follow-up');
     }
   };
 
@@ -45,17 +76,23 @@ export default function FollowUps() {
     setEditId(f._id);
     setForm({
       lead: f.lead?._id || '',
-      scheduledAt: f.scheduledAt ? new Date(f.scheduledAt).toISOString().slice(0, 16) : '',
+      scheduledAt: toDatetimeLocalValue(f.scheduledAt),
       type: f.type || 'call',
       notes: f.notes || '',
     });
+    setError('');
     setShowModal(true);
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this follow-up?')) return;
-    await api.delete(`/follow-ups/${id}`);
-    load();
+    setError('');
+    try {
+      await api.delete(`/follow-ups/${id}`);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete follow-up');
+    }
   };
 
   return (
@@ -65,10 +102,19 @@ export default function FollowUps() {
           <h1 className="font-display text-2xl font-bold">Follow-ups</h1>
           <p className="text-slate-500 text-sm">{overdue.length} overdue • {pending.length} pending</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="btn-primary">
+        <button
+          onClick={() => {
+            resetForm();
+            setShowModal(true);
+          }}
+          className="btn-primary"
+          type="button"
+        >
           <Plus size={16} /> Schedule
         </button>
       </div>
+
+      <ErrorBanner message={error && !showModal ? error : ''} />
 
       <div className="card divide-y">
         {followUps.length === 0 ? (
@@ -92,7 +138,7 @@ export default function FollowUps() {
                     {isOverdue ? 'Overdue' : f.status}
                   </span>
                   {f.status === 'pending' && (
-                    <button onClick={() => complete(f._id)} className="btn-secondary text-xs py-1">Complete</button>
+                    <button onClick={() => complete(f._id)} className="btn-secondary text-xs py-1" type="button">Complete</button>
                   )}
                   <button onClick={() => openEdit(f)} className="btn-secondary text-xs py-1" type="button">Edit</button>
                   <button onClick={() => handleDelete(f._id)} className="btn-secondary text-xs py-1 text-red-700" type="button">Delete</button>
@@ -106,8 +152,9 @@ export default function FollowUps() {
         <Pagination page={paged.page} totalPages={paged.totalPages} total={paged.total} onPageChange={setPage} />
       </div>
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditId(''); }} title={editId ? 'Edit Follow-up' : 'Schedule Follow-up'}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); resetForm(); }} title={editId ? 'Edit Follow-up' : 'Schedule Follow-up'}>
         <form onSubmit={handleCreate} className="space-y-4">
+          <ErrorBanner message={error} />
           <div>
             <label className="label">Lead</label>
             <select className="input" value={form.lead} onChange={(e) => setForm({ ...form, lead: e.target.value })} required>
@@ -117,7 +164,14 @@ export default function FollowUps() {
           </div>
           <div>
             <label className="label">Date & Time</label>
-            <input className="input" type="datetime-local" value={form.scheduledAt} onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })} required />
+            <input
+              className="input"
+              type="datetime-local"
+              value={form.scheduledAt}
+              onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
+              required
+            />
+            <p className="text-xs text-slate-500 mt-1">Date aur time dono select karein</p>
           </div>
           <div>
             <label className="label">Type</label>
@@ -129,7 +183,9 @@ export default function FollowUps() {
             <label className="label">Notes</label>
             <textarea className="input" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </div>
-          <button type="submit" className="btn-primary w-full">{editId ? 'Save Changes' : 'Schedule'}</button>
+          <button type="submit" className="btn-primary w-full" disabled={submitting}>
+            {submitting ? 'Saving...' : editId ? 'Save Changes' : 'Schedule'}
+          </button>
         </form>
       </Modal>
     </div>

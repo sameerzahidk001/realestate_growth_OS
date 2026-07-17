@@ -107,9 +107,9 @@ export const updateLead = async (req, res) => {
         source = COALESCE(${req.body.source ?? null}, source),
         status = COALESCE(${req.body.status ?? null}, status),
         notes = COALESCE(${req.body.notes ?? null}, notes),
-        "assignedToId" = COALESCE(${req.body.assignedTo ?? null}, "assignedToId"),
-        "projectId" = COALESCE(${req.body.project ?? null}, "projectId"),
-        "unitId" = COALESCE(${req.body.unit ?? null}, "unitId"),
+        "assignedToId" = COALESCE(${req.body.assignedTo || null}, "assignedToId"),
+        "projectId" = COALESCE(${req.body.project || null}, "projectId"),
+        "unitId" = COALESCE(${req.body.unit || null}, "unitId"),
         "budgetMin" = COALESCE(${req.body.budget?.min ?? null}, "budgetMin"),
         "budgetMax" = COALESCE(${req.body.budget?.max ?? null}, "budgetMax"),
         "bhkPreference" = COALESCE(${req.body.bhkPreference ?? null}, "bhkPreference"),
@@ -360,7 +360,20 @@ export const deleteLead = async (req, res) => {
     const existing = await fetchLeadById(req.params.id, builderId, where);
     if (!existing) return res.status(404).json({ message: 'Lead not found' });
 
+    const bookings = await sql`SELECT id FROM "Booking" WHERE "leadId" = ${existing.id} LIMIT 1`;
+    if (bookings.length) {
+      return res.status(400).json({ message: 'Cannot delete lead with existing bookings. Mark as Lost instead.' });
+    }
+
+    await sql`DELETE FROM "LeadActivity" WHERE "leadId" = ${existing.id}`;
+    await sql`DELETE FROM "FollowUp" WHERE "leadId" = ${existing.id}`;
+    await sql`DELETE FROM "SiteVisit" WHERE "leadId" = ${existing.id}`;
+    await sql`DELETE FROM "AIAlert" WHERE "leadId" = ${existing.id}`;
+    await sql`DELETE FROM "AIConversation" WHERE "leadId" = ${existing.id}`;
+    await sql`UPDATE "Referral" SET "referrerLeadId" = NULL WHERE "referrerLeadId" = ${existing.id}`;
+    await sql`UPDATE "Referral" SET "referredLeadId" = NULL WHERE "referredLeadId" = ${existing.id}`;
     await sql`DELETE FROM "Lead" WHERE id = ${existing.id} AND "builderId" = ${builderId}`;
+
     res.json({ message: 'Lead deleted' });
   } catch (err) {
     console.error('deleteLead:', err);
