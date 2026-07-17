@@ -100,6 +100,7 @@ export default function Leads() {
 
   const handleDelete = async (lead) => {
     if (!window.confirm(`Delete lead "${lead.name}"?`)) return;
+    setError('');
     try {
       await api.delete(`/leads/${lead._id}`);
       loadLeads();

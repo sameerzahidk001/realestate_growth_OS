@@ -86,28 +86,28 @@ const ROUTES = [
   { match: /^\/dashboard$/, methods: { GET: ['dashboard', 'getDashboard'] } },
 
   { match: /^\/follow-ups\/due$/, methods: { GET: ['followUp', 'getDueFollowUps'] } },
-  { match: /^\/follow-ups\/([^/]+)\/complete$/, methods: { PATCH: ['followUp', 'completeFollowUp'], params: ['id'] } },
-  { match: /^\/follow-ups\/([^/]+)$/, methods: { PUT: ['followUp', 'updateFollowUp'], DELETE: ['followUp', 'deleteFollowUp'], params: ['id'] } },
+  { match: /^\/follow-ups\/([^/]+)\/complete$/, params: ['id'], methods: { PATCH: ['followUp', 'completeFollowUp'] } },
+  { match: /^\/follow-ups\/([^/]+)$/, params: ['id'], methods: { PUT: ['followUp', 'updateFollowUp'], DELETE: ['followUp', 'deleteFollowUp'] } },
   { match: /^\/follow-ups$/, methods: { GET: ['followUp', 'getFollowUps'], POST: ['followUp', 'createFollowUp'] } },
 
-  { match: /^\/site-visits\/([^/]+)$/, methods: { PUT: ['siteVisit', 'updateSiteVisit'], DELETE: ['siteVisit', 'deleteSiteVisit'], params: ['id'] } },
+  { match: /^\/site-visits\/([^/]+)$/, params: ['id'], methods: { PUT: ['siteVisit', 'updateSiteVisit'], DELETE: ['siteVisit', 'deleteSiteVisit'] } },
   { match: /^\/site-visits$/, methods: { GET: ['siteVisit', 'getSiteVisits'], POST: ['siteVisit', 'createSiteVisit'] } },
 
-  { match: /^\/projects\/units\/([^/]+)\/link$/, methods: { PATCH: ['project', 'linkUnitToLead'], params: ['id'] } },
-  { match: /^\/projects\/units\/([^/]+)$/, methods: { PUT: ['project', 'updateUnit'], DELETE: ['project', 'deleteUnit'], params: ['id'] } },
-  { match: /^\/projects\/([^/]+)\/units$/, methods: { GET: ['project', 'getUnits'], POST: ['project', 'createUnit'], params: ['projectId'] } },
-  { match: /^\/projects\/([^/]+)$/, methods: { GET: ['project', 'getProject'], PUT: ['project', 'updateProject'], DELETE: ['project', 'deleteProject'], params: ['id'] } },
+  { match: /^\/projects\/units\/([^/]+)\/link$/, params: ['id'], methods: { PATCH: ['project', 'linkUnitToLead'] } },
+  { match: /^\/projects\/units\/([^/]+)$/, params: ['id'], methods: { PUT: ['project', 'updateUnit'], DELETE: ['project', 'deleteUnit'] } },
+  { match: /^\/projects\/([^/]+)\/units$/, params: ['projectId'], methods: { GET: ['project', 'getUnits'], POST: ['project', 'createUnit'] } },
+  { match: /^\/projects\/([^/]+)$/, params: ['id'], methods: { GET: ['project', 'getProject'], PUT: ['project', 'updateProject'], DELETE: ['project', 'deleteProject'] } },
   { match: /^\/projects$/, methods: { GET: ['project', 'getProjects'], POST: ['project', 'createProject'] } },
 
-  { match: /^\/users\/([^/]+)$/, methods: { PUT: ['user', 'updateUser'], DELETE: ['user', 'deleteUser'], params: ['id'] }, roles: ['owner', 'sales_manager'] },
+  { match: /^\/users\/([^/]+)$/, params: ['id'], methods: { PUT: ['user', 'updateUser'], DELETE: ['user', 'deleteUser'] }, roles: ['owner', 'sales_manager'] },
   { match: /^\/users$/, methods: { GET: ['user', 'getUsers'], POST: ['user', 'createUser'] }, roles: ['owner', 'sales_manager'] },
 
   { match: /^\/auth\/me$/, methods: { GET: ['auth', 'getMe'] } },
 
   { match: /^\/leads\/pipeline$/, methods: { GET: ['lead', 'getPipeline'] } },
-  { match: /^\/leads\/([^/]+)\/status$/, methods: { PATCH: ['lead', 'updateLeadStatus'], params: ['id'] } },
-  { match: /^\/leads\/([^/]+)\/notes$/, methods: { POST: ['lead', 'addLeadNote'], params: ['id'] } },
-  { match: /^\/leads\/([^/]+)$/, methods: { GET: ['lead', 'getLead'], PUT: ['lead', 'updateLead'], DELETE: ['lead', 'deleteLead'], params: ['id'] } },
+  { match: /^\/leads\/([^/]+)\/status$/, params: ['id'], methods: { PATCH: ['lead', 'updateLeadStatus'] } },
+  { match: /^\/leads\/([^/]+)\/notes$/, params: ['id'], methods: { POST: ['lead', 'addLeadNote'] } },
+  { match: /^\/leads\/([^/]+)$/, params: ['id'], methods: { GET: ['lead', 'getLead'], PUT: ['lead', 'updateLead'], DELETE: ['lead', 'deleteLead'] } },
   { match: /^\/leads$/, methods: { GET: ['lead', 'getLeads'], POST: ['lead', 'createLead'] } },
 ];
 
@@ -127,10 +127,13 @@ const matchRoute = (pathname) => {
     const m = clean.match(route.match);
     if (!m) continue;
 
+    const paramNames = route.params;
     const params = {};
-    route.params?.forEach((name, i) => {
-      params[name] = m[i + 1];
-    });
+    if (paramNames?.length) {
+      paramNames.forEach((name, i) => {
+        params[name] = m[i + 1];
+      });
+    }
 
     return { ...route, params };
   }
