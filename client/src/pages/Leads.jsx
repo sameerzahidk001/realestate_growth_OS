@@ -11,6 +11,7 @@ export default function Leads() {
   const [statusFilter, setStatusFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState('');
   const [form, setForm] = useState({ name: '', phone: '', email: '', source: 'manual', assignedTo: '' });
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
@@ -55,19 +56,29 @@ export default function Leads() {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true);
-    const fd = new FormData();
-    fd.append('file', file);
+    setError('');
+    setImportMsg('');
     try {
-      await api.post('/leads/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const csv = await file.text();
+      const { data } = await api.post('/leads/import', { csv });
       loadLeads();
+      setImportMsg(`${data.imported} lead(s) imported${data.skipped ? `, ${data.skipped} row(s) skipped` : ''}`);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to import CSV');
     } finally {
       setImporting(false);
+      e.target.value = '';
     }
   };
 
   const handleQualify = async (id) => {
-    await api.post(`/leads/${id}/ai-qualify`);
-    loadLeads();
+    setError('');
+    try {
+      await api.post(`/leads/${id}/ai-qualify`);
+      loadLeads();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to qualify lead');
+    }
   };
 
   const openEdit = (lead) => {
@@ -132,6 +143,9 @@ export default function Leads() {
       </div>
 
       <ErrorBanner message={error && !showModal && !showEditModal ? error : ''} />
+      {importMsg && (
+        <div className="p-3 bg-green-50 text-green-700 rounded-lg text-sm">{importMsg}</div>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">

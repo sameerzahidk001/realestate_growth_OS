@@ -105,6 +105,8 @@ const ROUTES = [
   { match: /^\/auth\/me$/, methods: { GET: ['auth', 'getMe'] } },
 
   { match: /^\/leads\/pipeline$/, methods: { GET: ['lead', 'getPipeline'] } },
+  { match: /^\/leads\/import$/, methods: { POST: ['lead', 'importLeads'] } },
+  { match: /^\/leads\/([^/]+)\/ai-qualify$/, params: ['id'], methods: { POST: ['lead', 'aiQualifyLead'] } },
   { match: /^\/leads\/([^/]+)\/status$/, params: ['id'], methods: { PATCH: ['lead', 'updateLeadStatus'] } },
   { match: /^\/leads\/([^/]+)\/notes$/, params: ['id'], methods: { POST: ['lead', 'addLeadNote'] } },
   { match: /^\/leads\/([^/]+)$/, params: ['id'], methods: { GET: ['lead', 'getLead'], PUT: ['lead', 'updateLead'], DELETE: ['lead', 'deleteLead'] } },

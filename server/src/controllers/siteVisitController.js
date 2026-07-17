@@ -80,7 +80,14 @@ export const createSiteVisit = async (req, res) => {
     const userId = getUserId(req.user);
     const id = cuid();
     const now = new Date();
+
+    if (!req.body.lead) return res.status(400).json({ message: 'Please select a lead' });
+    if (!req.body.project) return res.status(400).json({ message: 'Please select a project' });
     const scheduledAt = new Date(req.body.scheduledAt);
+    if (!req.body.scheduledAt || Number.isNaN(scheduledAt.getTime())) {
+      return res.status(400).json({ message: 'Please select both date and time' });
+    }
+
     const assignedToId = req.body.assignedTo || userId;
 
     await sql`
@@ -124,9 +131,21 @@ export const updateSiteVisit = async (req, res) => {
     `;
     if (!existing.length) return res.status(404).json({ message: 'Site visit not found' });
 
+    if (req.body.scheduledAt) {
+      const scheduledAtCheck = new Date(req.body.scheduledAt);
+      if (Number.isNaN(scheduledAtCheck.getTime())) {
+        return res.status(400).json({ message: 'Please select both date and time' });
+      }
+    }
+
+    const leadId = req.body.lead || null;
+    const projectId = req.body.project || null;
+
     await sql`
       UPDATE "SiteVisit"
       SET
+        "leadId" = COALESCE(${leadId}, "leadId"),
+        "projectId" = COALESCE(${projectId}, "projectId"),
         status = COALESCE(${status ?? null}, status),
         feedback = COALESCE(${feedback}, feedback),
         "completedAt" = COALESCE(${completedAt}, "completedAt"),

@@ -224,22 +224,58 @@ export const addLeadNote = async (req, res) => {
 
 export const importLeads = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: 'CSV file required' });
+    let csvText = '';
+    if (req.file?.buffer) {
+      csvText = req.file.buffer.toString('utf8');
+    } else if (typeof req.body?.csv === 'string' && req.body.csv.trim()) {
+      csvText = req.body.csv;
+    } else {
+      return res.status(400).json({ message: 'CSV file required. Columns: name, phone, email, source, notes' });
+    }
 
     const sql = getSql();
     const builderId = getBuilderId(req.user);
     const userId = getUserId(req.user);
-    const records = parse(req.file.buffer.toString(), {
+    const records = parse(csvText, {
       columns: true,
       skip_empty_lines: true,
       trim: true,
+      relax_column_count: true,
     });
 
+    if (!records.length) {
+      return res.status(400).json({ message: 'CSV is empty or has no data rows' });
+    }
+
+    const normalizeSource = (value) => {
+      const raw = (value || 'manual').toLowerCase().trim().replace(/[\s-]+/g, '_');
+      const map = {
+        walkin: 'walk_in',
+        walk_in: 'walk_in',
+        fb: 'facebook',
+        google_ads: 'google',
+        magic_bricks: 'magicbricks',
+        '99_acres': '99acres',
+        housingcom: 'housing',
+      };
+      return map[raw] || raw;
+    };
+
     const created = [];
-    for (const row of records) {
+    const skipped = [];
+
+    for (const [index, row] of records.entries()) {
+      const name = (row.name || row.Name || '').trim();
+      const phone = String(row.phone || row.Phone || '').trim();
+      if (!name || !phone) {
+        skipped.push({ row: index + 2, reason: 'name and phone are required' });
+        continue;
+      }
+
       const leadId = cuid();
       const now = new Date();
-      const source = (row.source || row.Source || 'manual').toLowerCase().replace(/\s+/g, '_');
+      const source = normalizeSource(row.source || row.Source);
+      const assignedTo = req.body.assignedTo || userId;
 
       await sql`
         INSERT INTO "Lead" (
@@ -247,16 +283,23 @@ export const importLeads = async (req, res) => {
           notes, "aiScore", "aiQualified", tags, "isSilent", "createdAt", "updatedAt"
         )
         VALUES (
-          ${leadId}, ${builderId}, ${row.name || row.Name}, ${row.phone || row.Phone},
-          ${row.email || row.Email || null}, ${source}, 'new',
-          ${req.body.assignedTo || userId}, ${row.notes || row.Notes || null},
+          ${leadId}, ${builderId}, ${name}, ${phone},
+          ${(row.email || row.Email || '').trim() || null}, ${source}, 'new',
+          ${assignedTo}, ${(row.notes || row.Notes || '').trim() || null},
           20, false, ARRAY[]::text[], false, ${now}, ${now}
         )
       `;
       created.push(await fetchLeadById(leadId, builderId));
     }
 
-    res.status(201).json({ imported: created.length, leads: created });
+    if (!created.length) {
+      return res.status(400).json({
+        message: 'No valid rows imported. Each row needs name and phone.',
+        skipped,
+      });
+    }
+
+    res.status(201).json({ imported: created.length, skipped: skipped.length, leads: created, skippedRows: skipped });
   } catch (err) {
     console.error('importLeads:', err);
     res.status(500).json({ message: err.message || 'Failed to import leads' });

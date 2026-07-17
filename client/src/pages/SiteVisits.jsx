@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import api from '../services/api';
-import { Modal, Pagination, formatDateTime, paginate } from '../components/ui';
+import {
+  Modal,
+  Pagination,
+  formatDateTime,
+  paginate,
+  toDatetimeLocalValue,
+  isValidDatetimeLocal,
+  ErrorBanner,
+} from '../components/ui';
 
 export default function SiteVisits() {
   const [visits, setVisits] = useState([]);
@@ -12,6 +20,8 @@ export default function SiteVisits() {
   const [form, setForm] = useState({ lead: '', project: '', scheduledAt: '' });
   const [editId, setEditId] = useState('');
   const [page, setPage] = useState(1);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const load = () => api.get('/site-visits').then((res) => setVisits(res.data));
 
@@ -21,19 +31,41 @@ export default function SiteVisits() {
     api.get('/projects').then((res) => setProjects(res.data));
   }, []);
 
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    if (editId) await api.put(`/site-visits/${editId}`, form);
-    else await api.post('/site-visits', form);
-    setShowModal(false);
+  const resetForm = () => {
     setEditId('');
     setForm({ lead: '', project: '', scheduledAt: '' });
-    load();
+    setError('');
+  };
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (!isValidDatetimeLocal(form.scheduledAt)) {
+      setError('Please select both date and time');
+      return;
+    }
+    setError('');
+    setSubmitting(true);
+    try {
+      if (editId) await api.put(`/site-visits/${editId}`, form);
+      else await api.post('/site-visits', form);
+      setShowModal(false);
+      resetForm();
+      load();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to save site visit');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const updateStatus = async (id, status, feedback) => {
-    await api.put(`/site-visits/${id}`, { status, feedback, completedAt: status === 'completed' ? new Date() : undefined });
-    load();
+    setError('');
+    try {
+      await api.put(`/site-visits/${id}`, { status, feedback, completedAt: status === 'completed' ? new Date() : undefined });
+      load();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update site visit');
+    }
   };
 
   const openEdit = (v) => {
@@ -41,15 +73,21 @@ export default function SiteVisits() {
     setForm({
       lead: v.lead?._id || '',
       project: v.project?._id || '',
-      scheduledAt: v.scheduledAt ? new Date(v.scheduledAt).toISOString().slice(0, 16) : '',
+      scheduledAt: toDatetimeLocalValue(v.scheduledAt),
     });
+    setError('');
     setShowModal(true);
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this site visit?')) return;
-    await api.delete(`/site-visits/${id}`);
-    load();
+    setError('');
+    try {
+      await api.delete(`/site-visits/${id}`);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete site visit');
+    }
   };
 
   const paged = useMemo(() => paginate(visits, page, 10), [visits, page]);
@@ -61,10 +99,19 @@ export default function SiteVisits() {
           <h1 className="font-display text-2xl font-bold">Site Visits</h1>
           <p className="text-slate-500 text-sm">Schedule and track property visits</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="btn-primary">
+        <button
+          onClick={() => {
+            resetForm();
+            setShowModal(true);
+          }}
+          className="btn-primary"
+          type="button"
+        >
           <Plus size={16} /> Schedule Visit
         </button>
       </div>
+
+      <ErrorBanner message={error && !showModal ? error : ''} />
 
       <div className="grid gap-4">
         {paged.items.map((v) => (
@@ -90,8 +137,8 @@ export default function SiteVisits() {
                     <button onClick={() => {
                       const fb = prompt('Visit feedback:');
                       if (fb !== null) updateStatus(v._id, 'completed', fb);
-                    }} className="btn-secondary text-xs py-1">Complete</button>
-                    <button onClick={() => updateStatus(v._id, 'no_show')} className="btn-secondary text-xs py-1">No-show</button>
+                    }} className="btn-secondary text-xs py-1" type="button">Complete</button>
+                    <button onClick={() => updateStatus(v._id, 'no_show')} className="btn-secondary text-xs py-1" type="button">No-show</button>
                   </>
                 )}
                 <button onClick={() => openEdit(v)} className="btn-secondary text-xs py-1" type="button">Edit</button>
@@ -105,8 +152,9 @@ export default function SiteVisits() {
         <Pagination page={paged.page} totalPages={paged.totalPages} total={paged.total} onPageChange={setPage} />
       </div>
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditId(''); }} title={editId ? 'Edit Site Visit' : 'Schedule Site Visit'}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); resetForm(); }} title={editId ? 'Edit Site Visit' : 'Schedule Site Visit'}>
         <form onSubmit={handleCreate} className="space-y-4">
+          <ErrorBanner message={error} />
           <div>
             <label className="label">Lead</label>
             <select className="input" value={form.lead} onChange={(e) => setForm({ ...form, lead: e.target.value })} required>
@@ -123,9 +171,18 @@ export default function SiteVisits() {
           </div>
           <div>
             <label className="label">Date & Time</label>
-            <input className="input" type="datetime-local" value={form.scheduledAt} onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })} required />
+            <input
+              className="input"
+              type="datetime-local"
+              value={form.scheduledAt}
+              onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
+              required
+            />
+            <p className="text-xs text-slate-500 mt-1">Date aur time dono select karein</p>
           </div>
-          <button type="submit" className="btn-primary w-full">{editId ? 'Save Changes' : 'Schedule'}</button>
+          <button type="submit" className="btn-primary w-full" disabled={submitting}>
+            {submitting ? 'Saving...' : editId ? 'Save Changes' : 'Schedule'}
+          </button>
         </form>
       </Modal>
     </div>

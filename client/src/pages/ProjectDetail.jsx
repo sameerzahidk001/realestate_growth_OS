@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Plus } from 'lucide-react';
 import api from '../services/api';
-import { Modal, Pagination, formatCurrency, paginate } from '../components/ui';
+import { Modal, Pagination, formatCurrency, paginate, ErrorBanner } from '../components/ui';
 
 const STATUS_COLORS = {
   available: 'bg-green-100 text-green-800',
@@ -29,6 +29,8 @@ export default function ProjectDetail() {
   const [form, setForm] = useState({ unitNumber: '', type: '2BHK', floor: '', area: '', price: '' });
   const [editUnitId, setEditUnitId] = useState('');
   const [page, setPage] = useState(1);
+  const [unitError, setUnitError] = useState('');
+  const [savingUnit, setSavingUnit] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -55,22 +57,31 @@ export default function ProjectDetail() {
 
   const handleCreateUnit = async (e) => {
     e.preventDefault();
+    setUnitError('');
+    setSavingUnit(true);
     const payload = {
       ...form,
       project: id,
       floor: Number(form.floor) || undefined,
       price: Number(form.price),
     };
-    if (editUnitId) await api.put(`/projects/units/${editUnitId}`, payload);
-    else await api.post(`/projects/${id}/units`, payload);
-    setShowModal(false);
-    setEditUnitId('');
-    setForm({ unitNumber: '', type: '2BHK', floor: '', area: '', price: '' });
-    load();
+    try {
+      if (editUnitId) await api.put(`/projects/units/${editUnitId}`, payload);
+      else await api.post(`/projects/${id}/units`, payload);
+      setShowModal(false);
+      setEditUnitId('');
+      setForm({ unitNumber: '', type: '2BHK', floor: '', area: '', price: '' });
+      load();
+    } catch (err) {
+      setUnitError(err.response?.data?.message || 'Failed to save unit');
+    } finally {
+      setSavingUnit(false);
+    }
   };
 
   const openEditUnit = (u) => {
     setEditUnitId(u._id);
+    setUnitError('');
     setForm({
       unitNumber: u.unitNumber || '',
       type: u.type || '2BHK',
@@ -83,8 +94,13 @@ export default function ProjectDetail() {
 
   const deleteUnit = async (u) => {
     if (!window.confirm(`Delete unit ${u.unitNumber}?`)) return;
-    await api.delete(`/projects/units/${u._id}`);
-    load();
+    setUnitError('');
+    try {
+      await api.delete(`/projects/units/${u._id}`);
+      load();
+    } catch (err) {
+      setUnitError(err.response?.data?.message || 'Failed to delete unit');
+    }
   };
 
   const paged = useMemo(() => paginate(units, page, 10), [units, page]);
@@ -131,10 +147,12 @@ export default function ProjectDetail() {
 
       <div className="flex justify-between items-center">
         <h2 className="font-display font-semibold text-lg">Units ({paged.total})</h2>
-        <button onClick={() => setShowModal(true)} className="btn-primary text-sm" type="button">
+        <button onClick={() => { setUnitError(''); setShowModal(true); }} className="btn-primary text-sm" type="button">
           <Plus size={16} /> Add Unit
         </button>
       </div>
+
+      <ErrorBanner message={unitError && !showModal ? unitError : ''} />
 
       <div className="card overflow-hidden">
         <table className="w-full text-sm">
@@ -179,8 +197,9 @@ export default function ProjectDetail() {
         <Pagination page={paged.page} totalPages={paged.totalPages} total={paged.total} onPageChange={setPage} />
       </div>
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditUnitId(''); }} title={editUnitId ? 'Edit Unit' : 'Add Unit'}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditUnitId(''); setUnitError(''); }} title={editUnitId ? 'Edit Unit' : 'Add Unit'}>
         <form onSubmit={handleCreateUnit} className="space-y-4">
+          <ErrorBanner message={unitError} />
           <div>
             <label className="label">Unit Number</label>
             <input className="input" value={form.unitNumber} onChange={(e) => setForm({ ...form, unitNumber: e.target.value })} required />
@@ -205,7 +224,9 @@ export default function ProjectDetail() {
             <label className="label">Price (₹)</label>
             <input className="input" type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required />
           </div>
-          <button type="submit" className="btn-primary w-full">{editUnitId ? 'Save Changes' : 'Add Unit'}</button>
+          <button type="submit" className="btn-primary w-full" disabled={savingUnit}>
+            {savingUnit ? 'Saving...' : editUnitId ? 'Save Changes' : 'Add Unit'}
+          </button>
         </form>
       </Modal>
     </div>
