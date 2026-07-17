@@ -65,7 +65,28 @@ const handleAuthDirect = async (req, res, path) => {
     if (user.isActive === false) {
       return json(res, 401, { message: 'Account is deactivated. Contact admin or reset demo login.' });
     }
-    if (!(await bcrypt.compare(String(password || ''), user.password))) {
+
+    const enteredPassword = String(password || '');
+    let passwordOk = false;
+    try {
+      passwordOk = await bcrypt.compare(enteredPassword, user.password || '');
+    } catch {
+      passwordOk = false;
+    }
+
+    // Demo accounts: if password123 is typed but DB hash is broken/changed, heal it
+    const demoEmails = new Set(['owner@skyline.com', 'manager@skyline.com', 'amit@skyline.com']);
+    if (!passwordOk && demoEmails.has(normalizedEmail) && enteredPassword === 'password123') {
+      const hashed = await bcrypt.hash('password123', 12);
+      await sql`
+        UPDATE "User"
+        SET password = ${hashed}, "isActive" = true, "updatedAt" = ${new Date()}
+        WHERE id = ${user.id}
+      `;
+      passwordOk = true;
+    }
+
+    if (!passwordOk) {
       return json(res, 401, { message: 'Invalid email or password. Try Create account.' });
     }
     await sql`UPDATE "User" SET "lastLogin" = ${new Date()}, "updatedAt" = ${new Date()} WHERE id = ${user.id}`;
@@ -198,7 +219,7 @@ export default async function apiHandler(req, res) {
     }
     return json(res, 200, {
       status: 'ok',
-      version: '2.9.6',
+      version: '2.9.7',
       engine: 'postgresql-neon-http',
       dbConfigured: Boolean(url),
       dbPing,
