@@ -161,7 +161,7 @@ export default async function apiHandler(req, res) {
     }
     return json(res, 200, {
       status: 'ok',
-      version: '2.5.0',
+      version: '2.6.0',
       engine: 'postgresql-neon-http',
       dbConfigured: Boolean(url),
       dbPing,

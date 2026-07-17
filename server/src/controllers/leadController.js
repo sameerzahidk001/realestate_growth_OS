@@ -1,307 +1,349 @@
 import { parse } from 'csv-parse/sync';
-import prisma from '../lib/prisma.js';
+import { getSql } from '../lib/neonSql.js';
+import { cuid, fetchLeadActivities, fetchLeadById, fetchLeads, mapLeadRow } from '../lib/neonLeadHelpers.js';
 import { calculateLeadScore, qualifyLead } from '../services/aiService.js';
 import { formatId, getBuilderId, getUserId } from '../utils/apiFormat.js';
 
-const leadInclude = {
-  assignedTo: { select: { id: true, name: true, email: true, phone: true } },
-  project: { select: { id: true, name: true, location: true } },
-  unit: { select: { id: true, unitNumber: true, type: true, price: true } },
-  activities: { orderBy: { createdAt: 'asc' } },
-};
-
-const buildLeadWhere = (user, query = {}) => {
-  const where = { builderId: getBuilderId(user) };
-
-  if (user.role === 'sales_executive') {
-    where.assignedToId = getUserId(user);
-  } else if (query.assignedTo) {
-    where.assignedToId = query.assignedTo;
-  }
-
-  if (query.status) where.status = query.status;
-  if (query.source) where.source = query.source;
-  if (query.search) {
-    where.OR = [
-      { name: { contains: query.search, mode: 'insensitive' } },
-      { phone: { contains: query.search } },
-      { email: { contains: query.search, mode: 'insensitive' } },
-    ];
-  }
-
-  return where;
-};
-
-const formatLead = (lead) => formatId(lead);
-
 export const getLeads = async (req, res) => {
-  const leads = await prisma.lead.findMany({
-    where: buildLeadWhere(req.user, req.query),
-    include: {
-      assignedTo: { select: { id: true, name: true, email: true } },
-      project: { select: { id: true, name: true, location: true } },
-    },
-    orderBy: [{ aiScore: 'desc' }, { createdAt: 'desc' }],
-  });
-  res.json(formatLead(leads));
+  try {
+    const leads = await fetchLeads(getBuilderId(req.user), {
+      role: req.user.role,
+      userId: getUserId(req.user),
+      query: req.query,
+    });
+    res.json(leads);
+  } catch (err) {
+    console.error('getLeads:', err);
+    res.status(500).json({ message: err.message || 'Failed to load leads' });
+  }
 };
 
 export const getLead = async (req, res) => {
-  const lead = await prisma.lead.findFirst({
-    where: { id: req.params.id, ...buildLeadWhere(req.user) },
-    include: leadInclude,
-  });
-  if (!lead) return res.status(404).json({ message: 'Lead not found' });
-  res.json(formatLead(lead));
+  try {
+    const lead = await fetchLeadById(req.params.id, getBuilderId(req.user), {
+      role: req.user.role,
+      userId: getUserId(req.user),
+    });
+    if (!lead) return res.status(404).json({ message: 'Lead not found' });
+
+    const activities = await fetchLeadActivities(lead.id);
+    res.json({ ...lead, activities });
+  } catch (err) {
+    console.error('getLead:', err);
+    res.status(500).json({ message: err.message || 'Failed to load lead' });
+  }
 };
 
 export const createLead = async (req, res) => {
-  const builderId = getBuilderId(req.user);
-  const assignedToId = req.body.assignedTo || (req.user.role === 'sales_executive' ? getUserId(req.user) : null);
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const userId = getUserId(req.user);
+    const assignedToId = req.body.assignedTo || (req.user.role === 'sales_executive' ? userId : null);
+    const leadId = cuid();
+    const now = new Date();
+    const source = (req.body.source || 'manual').toLowerCase().replace(/\s+/g, '_');
 
-  const lead = await prisma.lead.create({
-    data: {
-      builderId,
-      name: req.body.name,
-      phone: req.body.phone,
-      email: req.body.email,
-      source: req.body.source || 'manual',
-      status: 'new',
-      assignedToId,
-      projectId: req.body.project,
-      notes: req.body.notes,
-      budgetMin: req.body.budget?.min,
-      budgetMax: req.body.budget?.max,
-      bhkPreference: req.body.bhkPreference,
-      timeline: req.body.timeline,
-    },
-  });
+    await sql`
+      INSERT INTO "Lead" (
+        id, "builderId", name, phone, email, source, status, "assignedToId", "projectId",
+        notes, "budgetMin", "budgetMax", "bhkPreference", timeline,
+        "aiScore", "aiQualified", tags, "isSilent", "createdAt", "updatedAt"
+      )
+      VALUES (
+        ${leadId}, ${builderId}, ${req.body.name}, ${req.body.phone}, ${req.body.email || null},
+        ${source}, 'new', ${assignedToId || null}, ${req.body.project || null},
+        ${req.body.notes || null}, ${req.body.budget?.min ?? null}, ${req.body.budget?.max ?? null},
+        ${req.body.bhkPreference || null}, ${req.body.timeline || null},
+        0, false, ARRAY[]::text[], false, ${now}, ${now}
+      )
+    `;
 
-  const aiScore = calculateLeadScore(formatLead(lead));
-  await prisma.leadActivity.create({
-    data: { leadId: lead.id, type: 'note', description: 'Lead created', createdById: getUserId(req.user) },
-  });
+    await sql`
+      INSERT INTO "LeadActivity" (id, "leadId", type, description, "createdById", "createdAt")
+      VALUES (${cuid()}, ${leadId}, 'note', 'Lead created', ${userId}, ${now})
+    `;
 
-  const updated = await prisma.lead.update({
-    where: { id: lead.id },
-    data: { aiScore },
-    include: { assignedTo: { select: { id: true, name: true } } },
-  });
+    let lead = await fetchLeadById(leadId, builderId);
+    const aiScore = calculateLeadScore(lead);
+    await sql`UPDATE "Lead" SET "aiScore" = ${aiScore}, "updatedAt" = ${now} WHERE id = ${leadId}`;
+    lead = { ...lead, aiScore };
 
-  res.status(201).json(formatLead(updated));
+    res.status(201).json(lead);
+  } catch (err) {
+    console.error('createLead:', err);
+    res.status(500).json({ message: err.message || 'Failed to create lead' });
+  }
 };
 
 export const updateLead = async (req, res) => {
-  const where = { id: req.params.id, builderId: getBuilderId(req.user) };
-  if (req.user.role === 'sales_executive') where.assignedToId = getUserId(req.user);
-
-  const existing = await prisma.lead.findFirst({ where });
-  if (!existing) return res.status(404).json({ message: 'Lead not found' });
-
-  if (req.body.status && req.body.status !== existing.status) {
-    await prisma.leadActivity.create({
-      data: {
-        leadId: existing.id,
-        type: 'status_change',
-        description: `Status changed from ${existing.status} to ${req.body.status}`,
-        oldValue: existing.status,
-        newValue: req.body.status,
-        createdById: getUserId(req.user),
-      },
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const existing = await fetchLeadById(req.params.id, builderId, {
+      role: req.user.role,
+      userId: getUserId(req.user),
     });
+    if (!existing) return res.status(404).json({ message: 'Lead not found' });
+
+    if (req.body.status && req.body.status !== existing.status) {
+      await sql`
+        INSERT INTO "LeadActivity" (id, "leadId", type, description, "oldValue", "newValue", "createdById", "createdAt")
+        VALUES (
+          ${cuid()}, ${existing.id}, 'status_change',
+          ${`Status changed from ${existing.status} to ${req.body.status}`},
+          ${existing.status}, ${req.body.status}, ${getUserId(req.user)}, ${new Date()}
+        )
+      `;
+    }
+
+    const now = new Date();
+    await sql`
+      UPDATE "Lead"
+      SET
+        name = COALESCE(${req.body.name ?? null}, name),
+        phone = COALESCE(${req.body.phone ?? null}, phone),
+        email = COALESCE(${req.body.email ?? null}, email),
+        source = COALESCE(${req.body.source ?? null}, source),
+        status = COALESCE(${req.body.status ?? null}, status),
+        notes = COALESCE(${req.body.notes ?? null}, notes),
+        "assignedToId" = COALESCE(${req.body.assignedTo ?? null}, "assignedToId"),
+        "projectId" = COALESCE(${req.body.project ?? null}, "projectId"),
+        "unitId" = COALESCE(${req.body.unit ?? null}, "unitId"),
+        "budgetMin" = COALESCE(${req.body.budget?.min ?? null}, "budgetMin"),
+        "budgetMax" = COALESCE(${req.body.budget?.max ?? null}, "budgetMax"),
+        "bhkPreference" = COALESCE(${req.body.bhkPreference ?? null}, "bhkPreference"),
+        timeline = COALESCE(${req.body.timeline ?? null}, timeline),
+        "updatedAt" = ${now}
+      WHERE id = ${existing.id}
+    `;
+
+    let lead = await fetchLeadById(existing.id, builderId);
+    const aiScore = calculateLeadScore({ ...lead, ...req.body });
+    await sql`UPDATE "Lead" SET "aiScore" = ${aiScore} WHERE id = ${existing.id}`;
+    lead = { ...lead, aiScore };
+
+    res.json(lead);
+  } catch (err) {
+    console.error('updateLead:', err);
+    res.status(500).json({ message: err.message || 'Failed to update lead' });
   }
-
-  const data = { ...req.body };
-  delete data.budget;
-  if (req.body.budget) {
-    data.budgetMin = req.body.budget.min;
-    data.budgetMax = req.body.budget.max;
-  }
-  if (req.body.assignedTo) data.assignedToId = req.body.assignedTo;
-  if (req.body.project) data.projectId = req.body.project;
-  if (req.body.unit) data.unitId = req.body.unit;
-
-  const lead = await prisma.lead.update({
-    where: { id: existing.id },
-    data: { ...data, aiScore: calculateLeadScore({ ...existing, ...req.body }) },
-    include: { assignedTo: { select: { id: true, name: true } } },
-  });
-
-  res.json(formatLead(lead));
 };
 
 export const updateLeadStatus = async (req, res) => {
-  const { status } = req.body;
-  const where = { id: req.params.id, builderId: getBuilderId(req.user) };
-  if (req.user.role === 'sales_executive') where.assignedToId = getUserId(req.user);
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const { status } = req.body;
+    const existing = await fetchLeadById(req.params.id, builderId, {
+      role: req.user.role,
+      userId: getUserId(req.user),
+    });
+    if (!existing) return res.status(404).json({ message: 'Lead not found' });
 
-  const existing = await prisma.lead.findFirst({ where });
-  if (!existing) return res.status(404).json({ message: 'Lead not found' });
+    await sql`
+      INSERT INTO "LeadActivity" (id, "leadId", type, description, "oldValue", "newValue", "createdById", "createdAt")
+      VALUES (
+        ${cuid()}, ${existing.id}, 'status_change',
+        ${`Pipeline: ${existing.status} → ${status}`},
+        ${existing.status}, ${status}, ${getUserId(req.user)}, ${new Date()}
+      )
+    `;
 
-  await prisma.leadActivity.create({
-    data: {
-      leadId: existing.id,
-      type: 'status_change',
-      description: `Pipeline: ${existing.status} → ${status}`,
-      oldValue: existing.status,
-      newValue: status,
-      createdById: getUserId(req.user),
-    },
-  });
+    const aiScore = calculateLeadScore({ ...existing, status });
+    await sql`
+      UPDATE "Lead"
+      SET status = ${status}, "aiScore" = ${aiScore}, "updatedAt" = ${new Date()}
+      WHERE id = ${existing.id}
+    `;
 
-  const lead = await prisma.lead.update({
-    where: { id: existing.id },
-    data: { status, aiScore: calculateLeadScore({ ...existing, status }) },
-    include: { assignedTo: { select: { id: true, name: true } }, project: { select: { id: true, name: true } } },
-  });
-
-  res.json(formatLead(lead));
+    const lead = await fetchLeadById(existing.id, builderId);
+    res.json({ ...lead, aiScore });
+  } catch (err) {
+    console.error('updateLeadStatus:', err);
+    res.status(500).json({ message: err.message || 'Failed to update status' });
+  }
 };
 
 export const assignLead = async (req, res) => {
-  const { assignedTo } = req.body;
-  const lead = await prisma.lead.updateMany({
-    where: { id: req.params.id, builderId: getBuilderId(req.user) },
-    data: { assignedToId: assignedTo },
-  });
-  if (!lead.count) return res.status(404).json({ message: 'Lead not found' });
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const { assignedTo } = req.body;
+    const existing = await fetchLeadById(req.params.id, builderId);
+    if (!existing) return res.status(404).json({ message: 'Lead not found' });
 
-  const updated = await prisma.lead.findUnique({
-    where: { id: req.params.id },
-    include: { assignedTo: { select: { id: true, name: true } } },
-  });
+    await sql`
+      UPDATE "Lead"
+      SET "assignedToId" = ${assignedTo}, "updatedAt" = ${new Date()}
+      WHERE id = ${existing.id} AND "builderId" = ${builderId}
+    `;
 
-  await prisma.leadActivity.create({
-    data: {
-      leadId: updated.id,
-      type: 'assignment',
-      description: `Assigned to ${updated.assignedTo?.name}`,
-      createdById: getUserId(req.user),
-    },
-  });
+    const updated = await fetchLeadById(existing.id, builderId);
+    await sql`
+      INSERT INTO "LeadActivity" (id, "leadId", type, description, "createdById", "createdAt")
+      VALUES (
+        ${cuid()}, ${existing.id}, 'assignment',
+        ${`Assigned to ${updated.assignedTo?.name || 'executive'}`},
+        ${getUserId(req.user)}, ${new Date()}
+      )
+    `;
 
-  res.json(formatLead(updated));
+    res.json(updated);
+  } catch (err) {
+    console.error('assignLead:', err);
+    res.status(500).json({ message: err.message || 'Failed to assign lead' });
+  }
 };
 
 export const addLeadNote = async (req, res) => {
-  const { note, type = 'note' } = req.body;
-  const where = { id: req.params.id, builderId: getBuilderId(req.user) };
-  if (req.user.role === 'sales_executive') where.assignedToId = getUserId(req.user);
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const { note, type = 'note' } = req.body;
+    const lead = await fetchLeadById(req.params.id, builderId, {
+      role: req.user.role,
+      userId: getUserId(req.user),
+    });
+    if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-  const lead = await prisma.lead.findFirst({ where, include: leadInclude });
-  if (!lead) return res.status(404).json({ message: 'Lead not found' });
+    const now = new Date();
+    await sql`
+      INSERT INTO "LeadActivity" (id, "leadId", type, description, "createdById", "createdAt")
+      VALUES (${cuid()}, ${lead.id}, ${type}, ${note}, ${getUserId(req.user)}, ${now})
+    `;
+    await sql`UPDATE "Lead" SET "lastContactedAt" = ${now}, "updatedAt" = ${now} WHERE id = ${lead.id}`;
 
-  await prisma.leadActivity.create({
-    data: { leadId: lead.id, type, description: note, createdById: getUserId(req.user) },
-  });
-
-  const updated = await prisma.lead.update({
-    where: { id: lead.id },
-    data: { lastContactedAt: new Date() },
-    include: leadInclude,
-  });
-
-  res.json(formatLead(updated));
+    const activities = await fetchLeadActivities(lead.id);
+    res.json({ ...lead, activities });
+  } catch (err) {
+    console.error('addLeadNote:', err);
+    res.status(500).json({ message: err.message || 'Failed to add note' });
+  }
 };
 
 export const importLeads = async (req, res) => {
-  if (!req.file) return res.status(400).json({ message: 'CSV file required' });
+  try {
+    if (!req.file) return res.status(400).json({ message: 'CSV file required' });
 
-  const records = parse(req.file.buffer.toString(), {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
-  });
-
-  const created = [];
-  for (const row of records) {
-    const lead = await prisma.lead.create({
-      data: {
-        builderId: getBuilderId(req.user),
-        name: row.name || row.Name,
-        phone: row.phone || row.Phone,
-        email: row.email || row.Email,
-        source: (row.source || row.Source || 'manual').toLowerCase().replace(/\s+/g, '_'),
-        status: 'new',
-        assignedToId: req.body.assignedTo || getUserId(req.user),
-        notes: row.notes || row.Notes,
-        aiScore: 20,
-      },
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const userId = getUserId(req.user);
+    const records = parse(req.file.buffer.toString(), {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
     });
-    created.push(formatLead(lead));
-  }
 
-  res.status(201).json({ imported: created.length, leads: created });
+    const created = [];
+    for (const row of records) {
+      const leadId = cuid();
+      const now = new Date();
+      const source = (row.source || row.Source || 'manual').toLowerCase().replace(/\s+/g, '_');
+
+      await sql`
+        INSERT INTO "Lead" (
+          id, "builderId", name, phone, email, source, status, "assignedToId",
+          notes, "aiScore", "aiQualified", tags, "isSilent", "createdAt", "updatedAt"
+        )
+        VALUES (
+          ${leadId}, ${builderId}, ${row.name || row.Name}, ${row.phone || row.Phone},
+          ${row.email || row.Email || null}, ${source}, 'new',
+          ${req.body.assignedTo || userId}, ${row.notes || row.Notes || null},
+          20, false, ARRAY[]::text[], false, ${now}, ${now}
+        )
+      `;
+      created.push(await fetchLeadById(leadId, builderId));
+    }
+
+    res.status(201).json({ imported: created.length, leads: created });
+  } catch (err) {
+    console.error('importLeads:', err);
+    res.status(500).json({ message: err.message || 'Failed to import leads' });
+  }
 };
 
 export const getPipeline = async (req, res) => {
-  const where = buildLeadWhere(req.user);
-  const stages = ['new', 'contacted', 'interested', 'site_visit_done', 'negotiation', 'booked', 'lost'];
-  const pipeline = {};
+  try {
+    const builderId = getBuilderId(req.user);
+    const stages = ['new', 'contacted', 'interested', 'site_visit_done', 'negotiation', 'booked', 'lost'];
+    const pipeline = {};
 
-  for (const stage of stages) {
-    const leads = await prisma.lead.findMany({
-      where: { ...where, status: stage },
-      include: {
-        assignedTo: { select: { id: true, name: true } },
-        project: { select: { id: true, name: true } },
-      },
-      orderBy: [{ aiScore: 'desc' }, { updatedAt: 'desc' }],
-    });
-    pipeline[stage] = formatLead(leads);
+    for (const stage of stages) {
+      pipeline[stage] = await fetchLeads(builderId, {
+        role: req.user.role,
+        userId: getUserId(req.user),
+        query: { ...req.query, status: stage },
+      });
+    }
+
+    res.json(pipeline);
+  } catch (err) {
+    console.error('getPipeline:', err);
+    res.status(500).json({ message: err.message || 'Failed to load pipeline' });
   }
-
-  res.json(pipeline);
 };
 
 export const aiQualifyLead = async (req, res) => {
-  const lead = await prisma.lead.findFirst({
-    where: { id: req.params.id, builderId: getBuilderId(req.user) },
-    include: leadInclude,
-  });
-  if (!lead) return res.status(404).json({ message: 'Lead not found' });
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const lead = await fetchLeadById(req.params.id, builderId);
+    if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-  const qualification = await qualifyLead(formatLead(lead));
-  let budgetMin = lead.budgetMin;
-  let budgetMax = lead.budgetMax;
+    const activities = await fetchLeadActivities(lead.id);
+    const qualification = await qualifyLead({ ...lead, activities });
 
-  if (qualification.budget?.min) {
-    budgetMin = qualification.budget.min;
-    budgetMax = qualification.budget.max;
-  } else if (typeof qualification.budget === 'string') {
-    const match = qualification.budget.match(/(\d+)[^\d]+(\d+)/);
-    if (match) {
-      budgetMin = parseInt(match[1], 10) * 100000;
-      budgetMax = parseInt(match[2], 10) * 100000;
+    let budgetMin = lead.budgetMin;
+    let budgetMax = lead.budgetMax;
+
+    if (qualification.budget?.min) {
+      budgetMin = qualification.budget.min;
+      budgetMax = qualification.budget.max;
+    } else if (typeof qualification.budget === 'string') {
+      const match = qualification.budget.match(/(\d+)[^\d]+(\d+)/);
+      if (match) {
+        budgetMin = parseInt(match[1], 10) * 100000;
+        budgetMax = parseInt(match[2], 10) * 100000;
+      }
     }
+
+    const aiScore = calculateLeadScore({
+      ...lead,
+      ...qualification,
+      budget: { min: budgetMin, max: budgetMax },
+    });
+
+    await sql`
+      UPDATE "Lead"
+      SET
+        "aiQualificationData" = ${JSON.stringify(qualification)}::jsonb,
+        "aiQualified" = true,
+        "budgetMin" = ${budgetMin},
+        "budgetMax" = ${budgetMax},
+        "preferredLocation" = COALESCE(${qualification.location ?? null}, "preferredLocation"),
+        "loanRequired" = COALESCE(${qualification.loanRequired ?? null}, "loanRequired"),
+        "familySize" = COALESCE(${qualification.familySize ?? null}, "familySize"),
+        timeline = COALESCE(${qualification.timeline ?? null}, timeline),
+        "bhkPreference" = COALESCE(${qualification.bhkPreference ?? null}, "bhkPreference"),
+        "aiScore" = ${aiScore},
+        "updatedAt" = ${new Date()}
+      WHERE id = ${lead.id}
+    `;
+
+    await sql`
+      INSERT INTO "LeadActivity" (id, "leadId", type, description, "createdById", metadata, "createdAt")
+      VALUES (
+        ${cuid()}, ${lead.id}, 'ai_qualification',
+        ${qualification.summary || 'AI qualification completed'},
+        ${getUserId(req.user)}, ${JSON.stringify(qualification)}::jsonb, ${new Date()}
+      )
+    `;
+
+    const updated = await fetchLeadById(lead.id, builderId);
+    res.json({ lead: updated, qualification });
+  } catch (err) {
+    console.error('aiQualifyLead:', err);
+    res.status(500).json({ message: err.message || 'Failed to qualify lead' });
   }
-
-  const updated = await prisma.lead.update({
-    where: { id: lead.id },
-    data: {
-      aiQualificationData: qualification,
-      aiQualified: true,
-      budgetMin,
-      budgetMax,
-      preferredLocation: qualification.location || lead.preferredLocation,
-      loanRequired: qualification.loanRequired ?? lead.loanRequired,
-      familySize: qualification.familySize || lead.familySize,
-      timeline: qualification.timeline || lead.timeline,
-      bhkPreference: qualification.bhkPreference || lead.bhkPreference,
-      aiScore: calculateLeadScore({ ...formatLead(lead), ...qualification, budget: { min: budgetMin, max: budgetMax } }),
-    },
-    include: leadInclude,
-  });
-
-  await prisma.leadActivity.create({
-    data: {
-      leadId: lead.id,
-      type: 'ai_qualification',
-      description: qualification.summary || 'AI qualification completed',
-      createdById: getUserId(req.user),
-      metadata: qualification,
-    },
-  });
-
-  res.json({ lead: formatLead(updated), qualification });
 };

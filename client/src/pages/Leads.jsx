@@ -12,6 +12,8 @@ export default function Leads() {
   const [showModal, setShowModal] = useState(false);
   const [importing, setImporting] = useState(false);
   const [form, setForm] = useState({ name: '', phone: '', email: '', source: 'manual', assignedTo: '' });
+  const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const loadLeads = () => {
     const params = {};
@@ -27,10 +29,18 @@ export default function Leads() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    await api.post('/leads', form);
-    setShowModal(false);
-    setForm({ name: '', phone: '', email: '', source: 'manual', assignedTo: '' });
-    loadLeads();
+    setError('');
+    setCreating(true);
+    try {
+      await api.post('/leads', form);
+      setShowModal(false);
+      setForm({ name: '', phone: '', email: '', source: 'manual', assignedTo: '' });
+      loadLeads();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to create lead. Try again.');
+    } finally {
+      setCreating(false);
+    }
   };
 
   const handleImport = async (e) => {
@@ -133,6 +143,7 @@ export default function Leads() {
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Add New Lead">
         <form onSubmit={handleCreate} className="space-y-4">
+          {error && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
           <div>
             <label className="label">Name</label>
             <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
@@ -164,7 +175,9 @@ export default function Leads() {
               </select>
             </div>
           )}
-          <button type="submit" className="btn-primary w-full">Create Lead</button>
+          <button type="submit" className="btn-primary w-full" disabled={creating}>
+            {creating ? 'Creating...' : 'Create Lead'}
+          </button>
         </form>
       </Modal>
     </div>

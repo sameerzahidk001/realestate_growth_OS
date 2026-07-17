@@ -1,21 +1,22 @@
 import prisma from '../lib/prisma.js';
+import { getSql } from '../lib/neonSql.js';
 import { hashPassword } from '../lib/password.js';
 import { formatId, getBuilderId } from '../utils/apiFormat.js';
 
 export const getUsers = async (req, res) => {
-  const users = await prisma.user.findMany({
-    where: { builderId: getBuilderId(req.user) },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      role: true,
-      isActive: true,
-      createdAt: true,
-    },
-  });
-  res.json(formatId(users));
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT id, name, email, phone, role, "isActive", "createdAt"
+      FROM "User"
+      WHERE "builderId" = ${getBuilderId(req.user)} AND "isActive" = true
+      ORDER BY name ASC
+    `;
+    res.json(formatId(rows));
+  } catch (err) {
+    console.error('getUsers:', err);
+    res.status(500).json({ message: err.message || 'Failed to load users' });
+  }
 };
 
 export const createUser = async (req, res) => {
