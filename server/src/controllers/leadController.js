@@ -27,7 +27,7 @@ export const getLead = async (req, res) => {
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
     const activities = await fetchLeadActivities(lead.id);
-    res.json({ ...lead, activities });
+    res.json({ ...lead, activities: activities || [] });
   } catch (err) {
     console.error('getLead:', err);
     res.status(500).json({ message: err.message || 'Failed to load lead' });

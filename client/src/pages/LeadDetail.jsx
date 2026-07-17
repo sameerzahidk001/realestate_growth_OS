@@ -4,15 +4,41 @@ import { ArrowLeft, Sparkles, MessageCircle, Phone } from 'lucide-react';
 import api from '../services/api';
 import { StatusBadge, ScoreBadge, formatSource, formatDateTime, formatCurrency } from '../components/ui';
 
+const parseAiData = (value) => {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return { summary: String(value) };
+  }
+};
+
 export default function LeadDetail() {
   const { id } = useParams();
   const [lead, setLead] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [whatsappMsg, setWhatsappMsg] = useState('');
 
-  const loadLead = () => api.get(`/leads/${id}`).then((res) => setLead(res.data));
+  const loadLead = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const { data } = await api.get(`/leads/${id}`);
+      setLead({ ...data, activities: data.activities || [] });
+    } catch (err) {
+      setLead(null);
+      setError(err.response?.data?.message || 'Failed to load lead details');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  useEffect(() => { loadLead(); }, [id]);
+  useEffect(() => {
+    loadLead();
+  }, [id]);
 
   const addNote = async (e) => {
     e.preventDefault();
@@ -32,7 +58,28 @@ export default function LeadDetail() {
     loadLead();
   };
 
-  if (!lead) return <div className="animate-pulse h-64 card" />;
+  if (loading) {
+    return <div className="animate-pulse h-64 card" />;
+  }
+
+  if (error || !lead) {
+    return (
+      <div className="space-y-4 max-w-4xl">
+        <Link to="/leads" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-brand-600">
+          <ArrowLeft size={16} /> Back to leads
+        </Link>
+        <div className="card p-6">
+          <p className="text-red-600">{error || 'Lead not found'}</p>
+          <button type="button" onClick={loadLead} className="btn-primary mt-4">
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const aiData = parseAiData(lead.aiQualificationData);
+  const activities = lead.activities || [];
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -52,10 +99,10 @@ export default function LeadDetail() {
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={qualify} className="btn-secondary text-sm">
+            <button onClick={qualify} className="btn-secondary text-sm" type="button">
               <Sparkles size={16} /> AI Qualify
             </button>
-            <button onClick={sendWhatsapp} className="btn-secondary text-sm">
+            <button onClick={sendWhatsapp} className="btn-secondary text-sm" type="button">
               <MessageCircle size={16} /> AI WhatsApp
             </button>
           </div>
@@ -87,10 +134,10 @@ export default function LeadDetail() {
           </div>
         </div>
 
-        {lead.aiQualificationData && (
+        {aiData && (
           <div className="mt-4 p-4 bg-violet-50 rounded-lg">
             <p className="text-sm font-medium text-violet-800 mb-1">AI Qualification</p>
-            <p className="text-sm text-violet-900">{lead.aiQualificationData.summary || JSON.stringify(lead.aiQualificationData)}</p>
+            <p className="text-sm text-violet-900">{aiData.summary || JSON.stringify(aiData)}</p>
           </div>
         )}
       </div>
@@ -108,15 +155,17 @@ export default function LeadDetail() {
           <Phone size={18} /> Activity History
         </h2>
         <div className="space-y-4">
-          {lead.activities?.length === 0 ? (
+          {activities.length === 0 ? (
             <p className="text-slate-500 text-sm">No activity yet</p>
           ) : (
-            [...lead.activities].reverse().map((act, i) => (
-              <div key={i} className="flex gap-3 pb-4 border-b border-slate-100 last:border-0">
+            [...activities].reverse().map((act) => (
+              <div key={act._id || act.id} className="flex gap-3 pb-4 border-b border-slate-100 last:border-0">
                 <div className="w-2 h-2 rounded-full bg-brand-400 mt-2 shrink-0" />
                 <div>
-                  <p className="text-sm">{act.description}</p>
-                  <p className="text-xs text-slate-400 mt-1">{formatDateTime(act.createdAt)} • {act.type.replace(/_/g, ' ')}</p>
+                  <p className="text-sm">{act.description || '—'}</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {formatDateTime(act.createdAt)} • {(act.type || 'note').replace(/_/g, ' ')}
+                  </p>
                 </div>
               </div>
             ))

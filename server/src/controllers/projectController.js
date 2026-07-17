@@ -2,7 +2,31 @@ import { getSql } from '../lib/neonSql.js';
 import { cuid } from '../lib/neonLeadHelpers.js';
 import { formatId, getBuilderId } from '../utils/apiFormat.js';
 
-const mapProject = (row) => formatId({ ...row, id: row.id, _id: row.id });
+const asArray = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.startsWith('{') && value.endsWith('}')) {
+    return value.slice(1, -1).split(',').map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+};
+
+const mapProject = (row) => {
+  let priceList = row.priceList;
+  if (typeof priceList === 'string') {
+    try {
+      priceList = JSON.parse(priceList);
+    } catch {
+      priceList = null;
+    }
+  }
+  return formatId({
+    ...row,
+    id: row.id,
+    _id: row.id,
+    amenities: asArray(row.amenities),
+    priceList,
+  });
+};
 
 const mapUnit = (row) =>
   formatId({
