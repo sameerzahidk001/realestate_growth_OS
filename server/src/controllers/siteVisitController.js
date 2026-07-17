@@ -149,3 +149,22 @@ export const updateSiteVisit = async (req, res) => {
     res.status(500).json({ message: err.message || 'Failed to update site visit' });
   }
 };
+
+export const deleteSiteVisit = async (req, res) => {
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const existing = await sql`
+      SELECT id FROM "SiteVisit"
+      WHERE id = ${req.params.id} AND "builderId" = ${builderId}
+      LIMIT 1
+    `;
+    if (!existing.length) return res.status(404).json({ message: 'Site visit not found' });
+
+    await sql`DELETE FROM "SiteVisit" WHERE id = ${req.params.id} AND "builderId" = ${builderId}`;
+    res.json({ message: 'Site visit deleted' });
+  } catch (err) {
+    console.error('deleteSiteVisit:', err);
+    res.status(500).json({ message: err.message || 'Failed to delete site visit' });
+  }
+};

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Plus } from 'lucide-react';
 import api from '../services/api';
-import { Modal, formatCurrency } from '../components/ui';
+import { Modal, Pagination, formatCurrency, paginate } from '../components/ui';
 
 const STATUS_COLORS = {
   available: 'bg-green-100 text-green-800',
@@ -17,6 +17,8 @@ export default function ProjectDetail() {
   const [units, setUnits] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ unitNumber: '', type: '2BHK', floor: '', area: '', price: '' });
+  const [editUnitId, setEditUnitId] = useState('');
+  const [page, setPage] = useState(1);
 
   const load = () => {
     api.get(`/projects/${id}`).then((res) => setProject(res.data));
@@ -27,15 +29,39 @@ export default function ProjectDetail() {
 
   const handleCreateUnit = async (e) => {
     e.preventDefault();
-    await api.post(`/projects/${id}/units`, {
+    const payload = {
       ...form,
       project: id,
       floor: Number(form.floor) || undefined,
       price: Number(form.price),
-    });
+    };
+    if (editUnitId) await api.put(`/projects/units/${editUnitId}`, payload);
+    else await api.post(`/projects/${id}/units`, payload);
     setShowModal(false);
+    setEditUnitId('');
+    setForm({ unitNumber: '', type: '2BHK', floor: '', area: '', price: '' });
     load();
   };
+
+  const openEditUnit = (u) => {
+    setEditUnitId(u._id);
+    setForm({
+      unitNumber: u.unitNumber || '',
+      type: u.type || '2BHK',
+      floor: String(u.floor || ''),
+      area: u.area || '',
+      price: String(u.price || ''),
+    });
+    setShowModal(true);
+  };
+
+  const deleteUnit = async (u) => {
+    if (!window.confirm(`Delete unit ${u.unitNumber}?`)) return;
+    await api.delete(`/projects/units/${u._id}`);
+    load();
+  };
+
+  const paged = useMemo(() => paginate(units, page, 10), [units, page]);
 
   if (!project) return <div className="animate-pulse h-64 card" />;
 
@@ -58,7 +84,7 @@ export default function ProjectDetail() {
       </div>
 
       <div className="flex justify-between items-center">
-        <h2 className="font-display font-semibold text-lg">Units ({units.length})</h2>
+        <h2 className="font-display font-semibold text-lg">Units ({paged.total})</h2>
         <button onClick={() => setShowModal(true)} className="btn-primary text-sm">
           <Plus size={16} /> Add Unit
         </button>
@@ -74,10 +100,11 @@ export default function ProjectDetail() {
               <th className="text-left p-4">Area</th>
               <th className="text-left p-4">Price</th>
               <th className="text-left p-4">Status</th>
+              <th className="text-left p-4">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {units.map((u) => (
+            {paged.items.map((u) => (
               <tr key={u._id} className="border-t">
                 <td className="p-4 font-medium">{u.unitNumber}</td>
                 <td className="p-4">{u.type}</td>
@@ -87,13 +114,22 @@ export default function ProjectDetail() {
                 <td className="p-4">
                   <span className={`badge ${STATUS_COLORS[u.status]}`}>{u.status}</span>
                 </td>
+                <td className="p-4">
+                  <div className="flex items-center gap-3">
+                    <button type="button" className="text-xs text-blue-600 hover:underline" onClick={() => openEditUnit(u)}>Edit</button>
+                    <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => deleteUnit(u)}>Delete</button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <div className="card overflow-hidden">
+        <Pagination page={paged.page} totalPages={paged.totalPages} total={paged.total} onPageChange={setPage} />
+      </div>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Unit">
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditUnitId(''); }} title={editUnitId ? 'Edit Unit' : 'Add Unit'}>
         <form onSubmit={handleCreateUnit} className="space-y-4">
           <div>
             <label className="label">Unit Number</label>
@@ -119,7 +155,7 @@ export default function ProjectDetail() {
             <label className="label">Price (₹)</label>
             <input className="input" type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required />
           </div>
-          <button type="submit" className="btn-primary w-full">Add Unit</button>
+          <button type="submit" className="btn-primary w-full">{editUnitId ? 'Save Changes' : 'Add Unit'}</button>
         </form>
       </Modal>
     </div>

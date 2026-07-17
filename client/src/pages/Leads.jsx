@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Upload, Search, Sparkles } from 'lucide-react';
 import api from '../services/api';
-import { StatusBadge, ScoreBadge, formatSource, Modal } from '../components/ui';
+import { StatusBadge, ScoreBadge, formatSource, Modal, paginate, Pagination } from '../components/ui';
 
 export default function Leads() {
   const [leads, setLeads] = useState([]);
@@ -14,6 +14,10 @@ export default function Leads() {
   const [form, setForm] = useState({ name: '', phone: '', email: '', source: 'manual', assignedTo: '' });
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [page, setPage] = useState(1);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({ id: '', name: '', phone: '', email: '', source: 'manual', assignedTo: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const loadLeads = () => {
     const params = {};
@@ -26,6 +30,10 @@ export default function Leads() {
     loadLeads();
     api.get('/users').then((res) => setUsers(res.data)).catch(() => {});
   }, [search, statusFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, leads.length]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -62,12 +70,52 @@ export default function Leads() {
     loadLeads();
   };
 
+  const openEdit = (lead) => {
+    setError('');
+    setEditForm({
+      id: lead._id,
+      name: lead.name || '',
+      phone: lead.phone || '',
+      email: lead.email || '',
+      source: lead.source || 'manual',
+      assignedTo: lead.assignedTo?._id || '',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleEdit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSavingEdit(true);
+    try {
+      await api.put(`/leads/${editForm.id}`, editForm);
+      setShowEditModal(false);
+      loadLeads();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update lead');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDelete = async (lead) => {
+    if (!window.confirm(`Delete lead "${lead.name}"?`)) return;
+    try {
+      await api.delete(`/leads/${lead._id}`);
+      loadLeads();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete lead');
+    }
+  };
+
+  const paged = useMemo(() => paginate(leads, page, 10), [leads, page]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold">Leads</h1>
-          <p className="text-slate-500 text-sm mt-1">{leads.length} leads</p>
+          <p className="text-slate-500 text-sm mt-1">{paged.total} leads</p>
         </div>
         <div className="flex gap-2">
           <label className="btn-secondary cursor-pointer">
@@ -115,7 +163,7 @@ export default function Leads() {
               </tr>
             </thead>
             <tbody>
-              {leads.map((lead) => (
+              {paged.items.map((lead) => (
                 <tr key={lead._id} className="border-t border-slate-100 hover:bg-slate-50/50">
                   <td className="p-4">
                     <Link to={`/leads/${lead._id}`} className="font-medium text-brand-600 hover:underline">
@@ -128,17 +176,26 @@ export default function Leads() {
                   <td className="p-4"><ScoreBadge score={lead.aiScore} /></td>
                   <td className="p-4">{lead.assignedTo?.name || '—'}</td>
                   <td className="p-4">
-                    {!lead.aiQualified && (
-                      <button onClick={() => handleQualify(lead._id)} className="text-xs text-violet-600 hover:underline flex items-center gap-1">
-                        <Sparkles size={12} /> Qualify
+                    <div className="flex items-center gap-3">
+                      {!lead.aiQualified && (
+                        <button onClick={() => handleQualify(lead._id)} className="text-xs text-violet-600 hover:underline flex items-center gap-1">
+                          <Sparkles size={12} /> Qualify
+                        </button>
+                      )}
+                      <button onClick={() => openEdit(lead)} className="text-xs text-blue-600 hover:underline" type="button">
+                        Edit
                       </button>
-                    )}
+                      <button onClick={() => handleDelete(lead)} className="text-xs text-red-600 hover:underline" type="button">
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <Pagination page={paged.page} totalPages={paged.totalPages} total={paged.total} onPageChange={setPage} />
       </div>
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Add New Lead">
@@ -177,6 +234,46 @@ export default function Leads() {
           )}
           <button type="submit" className="btn-primary w-full" disabled={creating}>
             {creating ? 'Creating...' : 'Create Lead'}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal open={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Lead">
+        <form onSubmit={handleEdit} className="space-y-4">
+          {error && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
+          <div>
+            <label className="label">Name</label>
+            <input className="input" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} required />
+          </div>
+          <div>
+            <label className="label">Phone</label>
+            <input className="input" value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} required />
+          </div>
+          <div>
+            <label className="label">Email</label>
+            <input className="input" type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
+          </div>
+          <div>
+            <label className="label">Source</label>
+            <select className="input" value={editForm.source} onChange={(e) => setEditForm({ ...editForm, source: e.target.value })}>
+              {['manual', 'walk_in', 'website', 'facebook', 'google', 'referral', 'whatsapp', 'magicbricks', '99acres', 'housing'].map((s) => (
+                <option key={s} value={s}>{formatSource(s)}</option>
+              ))}
+            </select>
+          </div>
+          {users.length > 0 && (
+            <div>
+              <label className="label">Assign to</label>
+              <select className="input" value={editForm.assignedTo} onChange={(e) => setEditForm({ ...editForm, assignedTo: e.target.value })}>
+                <option value="">Auto assign</option>
+                {users.map((u) => (
+                  <option key={u._id} value={u._id}>{u.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <button type="submit" className="btn-primary w-full" disabled={savingEdit}>
+            {savingEdit ? 'Saving...' : 'Save Changes'}
           </button>
         </form>
       </Modal>

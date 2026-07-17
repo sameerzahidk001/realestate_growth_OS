@@ -11,6 +11,7 @@ import {
   importLeads,
   getPipeline,
   aiQualifyLead,
+  deleteLead,
 } from '../controllers/leadController.js';
 import { protect } from '../middleware/auth.js';
 
@@ -24,6 +25,7 @@ router.post('/import', upload.single('file'), importLeads);
 router.get('/:id', getLead);
 router.post('/', createLead);
 router.put('/:id', updateLead);
+router.delete('/:id', deleteLead);
 router.patch('/:id/status', updateLeadStatus);
 router.patch('/:id/assign', assignLead);
 router.post('/:id/notes', addLeadNote);

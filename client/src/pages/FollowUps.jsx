@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import api from '../services/api';
-import { Modal, formatDateTime } from '../components/ui';
+import { Modal, Pagination, formatDateTime, paginate } from '../components/ui';
 
 export default function FollowUps() {
   const [followUps, setFollowUps] = useState([]);
   const [leads, setLeads] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ lead: '', scheduledAt: '', type: 'call', notes: '' });
+  const [editId, setEditId] = useState('');
+  const [page, setPage] = useState(1);
 
   const load = () => api.get('/follow-ups').then((res) => setFollowUps(res.data));
 
@@ -19,8 +21,10 @@ export default function FollowUps() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    await api.post('/follow-ups', form);
+    if (editId) await api.put(`/follow-ups/${editId}`, form);
+    else await api.post('/follow-ups', form);
     setShowModal(false);
+    setEditId('');
     setForm({ lead: '', scheduledAt: '', type: 'call', notes: '' });
     load();
   };
@@ -35,6 +39,24 @@ export default function FollowUps() {
 
   const pending = followUps.filter((f) => f.status === 'pending');
   const overdue = pending.filter((f) => new Date(f.scheduledAt) < new Date());
+  const paged = useMemo(() => paginate(followUps, page, 10), [followUps, page]);
+
+  const openEdit = (f) => {
+    setEditId(f._id);
+    setForm({
+      lead: f.lead?._id || '',
+      scheduledAt: f.scheduledAt ? new Date(f.scheduledAt).toISOString().slice(0, 16) : '',
+      type: f.type || 'call',
+      notes: f.notes || '',
+    });
+    setShowModal(true);
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this follow-up?')) return;
+    await api.delete(`/follow-ups/${id}`);
+    load();
+  };
 
   return (
     <div className="space-y-6">
@@ -52,7 +74,7 @@ export default function FollowUps() {
         {followUps.length === 0 ? (
           <p className="p-8 text-center text-slate-500">No follow-ups scheduled</p>
         ) : (
-          followUps.map((f) => {
+          paged.items.map((f) => {
             const isOverdue = f.status === 'pending' && new Date(f.scheduledAt) < new Date();
             return (
               <div key={f._id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -72,14 +94,19 @@ export default function FollowUps() {
                   {f.status === 'pending' && (
                     <button onClick={() => complete(f._id)} className="btn-secondary text-xs py-1">Complete</button>
                   )}
+                  <button onClick={() => openEdit(f)} className="btn-secondary text-xs py-1" type="button">Edit</button>
+                  <button onClick={() => handleDelete(f._id)} className="btn-secondary text-xs py-1 text-red-700" type="button">Delete</button>
                 </div>
               </div>
             );
           })
         )}
       </div>
+      <div className="card overflow-hidden">
+        <Pagination page={paged.page} totalPages={paged.totalPages} total={paged.total} onPageChange={setPage} />
+      </div>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Schedule Follow-up">
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditId(''); }} title={editId ? 'Edit Follow-up' : 'Schedule Follow-up'}>
         <form onSubmit={handleCreate} className="space-y-4">
           <div>
             <label className="label">Lead</label>
@@ -102,7 +129,7 @@ export default function FollowUps() {
             <label className="label">Notes</label>
             <textarea className="input" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </div>
-          <button type="submit" className="btn-primary w-full">Schedule</button>
+          <button type="submit" className="btn-primary w-full">{editId ? 'Save Changes' : 'Schedule'}</button>
         </form>
       </Modal>
     </div>

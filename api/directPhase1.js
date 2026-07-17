@@ -87,15 +87,16 @@ const ROUTES = [
 
   { match: /^\/follow-ups\/due$/, methods: { GET: ['followUp', 'getDueFollowUps'] } },
   { match: /^\/follow-ups\/([^/]+)\/complete$/, methods: { PATCH: ['followUp', 'completeFollowUp'], params: ['id'] } },
+  { match: /^\/follow-ups\/([^/]+)$/, methods: { PUT: ['followUp', 'updateFollowUp'], DELETE: ['followUp', 'deleteFollowUp'], params: ['id'] } },
   { match: /^\/follow-ups$/, methods: { GET: ['followUp', 'getFollowUps'], POST: ['followUp', 'createFollowUp'] } },
 
-  { match: /^\/site-visits\/([^/]+)$/, methods: { PUT: ['siteVisit', 'updateSiteVisit'], params: ['id'] } },
+  { match: /^\/site-visits\/([^/]+)$/, methods: { PUT: ['siteVisit', 'updateSiteVisit'], DELETE: ['siteVisit', 'deleteSiteVisit'], params: ['id'] } },
   { match: /^\/site-visits$/, methods: { GET: ['siteVisit', 'getSiteVisits'], POST: ['siteVisit', 'createSiteVisit'] } },
 
   { match: /^\/projects\/units\/([^/]+)\/link$/, methods: { PATCH: ['project', 'linkUnitToLead'], params: ['id'] } },
-  { match: /^\/projects\/units\/([^/]+)$/, methods: { PUT: ['project', 'updateUnit'], params: ['id'] } },
+  { match: /^\/projects\/units\/([^/]+)$/, methods: { PUT: ['project', 'updateUnit'], DELETE: ['project', 'deleteUnit'], params: ['id'] } },
   { match: /^\/projects\/([^/]+)\/units$/, methods: { GET: ['project', 'getUnits'], POST: ['project', 'createUnit'], params: ['projectId'] } },
-  { match: /^\/projects\/([^/]+)$/, methods: { GET: ['project', 'getProject'], PUT: ['project', 'updateProject'], params: ['id'] } },
+  { match: /^\/projects\/([^/]+)$/, methods: { GET: ['project', 'getProject'], PUT: ['project', 'updateProject'], DELETE: ['project', 'deleteProject'], params: ['id'] } },
   { match: /^\/projects$/, methods: { GET: ['project', 'getProjects'], POST: ['project', 'createProject'] } },
 
   { match: /^\/users\/([^/]+)$/, methods: { PUT: ['user', 'updateUser'], DELETE: ['user', 'deleteUser'], params: ['id'] }, roles: ['owner', 'sales_manager'] },
@@ -106,7 +107,7 @@ const ROUTES = [
   { match: /^\/leads\/pipeline$/, methods: { GET: ['lead', 'getPipeline'] } },
   { match: /^\/leads\/([^/]+)\/status$/, methods: { PATCH: ['lead', 'updateLeadStatus'], params: ['id'] } },
   { match: /^\/leads\/([^/]+)\/notes$/, methods: { POST: ['lead', 'addLeadNote'], params: ['id'] } },
-  { match: /^\/leads\/([^/]+)$/, methods: { GET: ['lead', 'getLead'], PUT: ['lead', 'updateLead'], params: ['id'] } },
+  { match: /^\/leads\/([^/]+)$/, methods: { GET: ['lead', 'getLead'], PUT: ['lead', 'updateLead'], DELETE: ['lead', 'deleteLead'], params: ['id'] } },
   { match: /^\/leads$/, methods: { GET: ['lead', 'getLeads'], POST: ['lead', 'createLead'] } },
 ];
 

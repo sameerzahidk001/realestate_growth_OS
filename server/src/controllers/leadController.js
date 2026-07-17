@@ -347,3 +347,23 @@ export const aiQualifyLead = async (req, res) => {
     res.status(500).json({ message: err.message || 'Failed to qualify lead' });
   }
 };
+
+export const deleteLead = async (req, res) => {
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const where = {
+      role: req.user.role,
+      userId: getUserId(req.user),
+    };
+
+    const existing = await fetchLeadById(req.params.id, builderId, where);
+    if (!existing) return res.status(404).json({ message: 'Lead not found' });
+
+    await sql`DELETE FROM "Lead" WHERE id = ${existing.id} AND "builderId" = ${builderId}`;
+    res.json({ message: 'Lead deleted' });
+  } catch (err) {
+    console.error('deleteLead:', err);
+    res.status(500).json({ message: err.message || 'Failed to delete lead' });
+  }
+};

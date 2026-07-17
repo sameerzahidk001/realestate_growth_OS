@@ -248,3 +248,55 @@ export const linkUnitToLead = async (req, res) => {
     res.status(500).json({ message: err.message || 'Failed to link unit' });
   }
 };
+
+export const deleteProject = async (req, res) => {
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const now = new Date();
+    const existing = await sql`
+      SELECT id FROM "Project"
+      WHERE id = ${req.params.id} AND "builderId" = ${builderId}
+      LIMIT 1
+    `;
+    if (!existing.length) return res.status(404).json({ message: 'Project not found' });
+
+    await sql`
+      UPDATE "Project"
+      SET "isActive" = false, "updatedAt" = ${now}
+      WHERE id = ${req.params.id}
+    `;
+    res.json({ message: 'Project deleted' });
+  } catch (err) {
+    console.error('deleteProject:', err);
+    res.status(500).json({ message: err.message || 'Failed to delete project' });
+  }
+};
+
+export const deleteUnit = async (req, res) => {
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const now = new Date();
+    const existingRows = await sql`
+      SELECT id, "projectId"
+      FROM "Unit"
+      WHERE id = ${req.params.id} AND "builderId" = ${builderId}
+      LIMIT 1
+    `;
+    if (!existingRows.length) return res.status(404).json({ message: 'Unit not found' });
+
+    const unit = existingRows[0];
+    await sql`DELETE FROM "Unit" WHERE id = ${unit.id} AND "builderId" = ${builderId}`;
+    await sql`
+      UPDATE "Project"
+      SET "totalUnits" = GREATEST("totalUnits" - 1, 0), "updatedAt" = ${now}
+      WHERE id = ${unit.projectId}
+    `;
+
+    res.json({ message: 'Unit deleted' });
+  } catch (err) {
+    console.error('deleteUnit:', err);
+    res.status(500).json({ message: err.message || 'Failed to delete unit' });
+  }
+};

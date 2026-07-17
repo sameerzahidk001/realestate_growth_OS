@@ -66,6 +66,51 @@ export const STAGES = [
   { key: 'lost', label: 'Lost', color: 'border-red-400' },
 ];
 
+export const paginate = (items = [], page = 1, perPage = 10) => {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safePerPage = Math.max(1, Number(perPage) || 10);
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / safePerPage));
+  const current = Math.min(safePage, totalPages);
+  const start = (current - 1) * safePerPage;
+  return {
+    page: current,
+    perPage: safePerPage,
+    total,
+    totalPages,
+    items: items.slice(start, start + safePerPage),
+  };
+};
+
+export function Pagination({ page, totalPages, total, onPageChange }) {
+  if (!total || totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-t bg-slate-50 text-sm">
+      <p className="text-slate-500">
+        Page {page} of {totalPages} ({total} records)
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          className="btn-secondary text-xs py-1 px-3 disabled:opacity-50"
+          onClick={() => onPageChange(page - 1)}
+          disabled={page <= 1}
+          type="button"
+        >
+          Prev
+        </button>
+        <button
+          className="btn-secondary text-xs py-1 px-3 disabled:opacity-50"
+          onClick={() => onPageChange(page + 1)}
+          disabled={page >= totalPages}
+          type="button"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Modal({ open, onClose, title, children, wide }) {
   if (!open) return null;
   return (

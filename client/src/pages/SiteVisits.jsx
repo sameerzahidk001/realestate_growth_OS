@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import api from '../services/api';
-import { Modal, formatDateTime } from '../components/ui';
+import { Modal, Pagination, formatDateTime, paginate } from '../components/ui';
 
 export default function SiteVisits() {
   const [visits, setVisits] = useState([]);
@@ -10,6 +10,8 @@ export default function SiteVisits() {
   const [projects, setProjects] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ lead: '', project: '', scheduledAt: '' });
+  const [editId, setEditId] = useState('');
+  const [page, setPage] = useState(1);
 
   const load = () => api.get('/site-visits').then((res) => setVisits(res.data));
 
@@ -21,8 +23,11 @@ export default function SiteVisits() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    await api.post('/site-visits', form);
+    if (editId) await api.put(`/site-visits/${editId}`, form);
+    else await api.post('/site-visits', form);
     setShowModal(false);
+    setEditId('');
+    setForm({ lead: '', project: '', scheduledAt: '' });
     load();
   };
 
@@ -30,6 +35,24 @@ export default function SiteVisits() {
     await api.put(`/site-visits/${id}`, { status, feedback, completedAt: status === 'completed' ? new Date() : undefined });
     load();
   };
+
+  const openEdit = (v) => {
+    setEditId(v._id);
+    setForm({
+      lead: v.lead?._id || '',
+      project: v.project?._id || '',
+      scheduledAt: v.scheduledAt ? new Date(v.scheduledAt).toISOString().slice(0, 16) : '',
+    });
+    setShowModal(true);
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this site visit?')) return;
+    await api.delete(`/site-visits/${id}`);
+    load();
+  };
+
+  const paged = useMemo(() => paginate(visits, page, 10), [visits, page]);
 
   return (
     <div className="space-y-6">
@@ -44,7 +67,7 @@ export default function SiteVisits() {
       </div>
 
       <div className="grid gap-4">
-        {visits.map((v) => (
+        {paged.items.map((v) => (
           <div key={v._id} className="card p-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
@@ -71,13 +94,18 @@ export default function SiteVisits() {
                     <button onClick={() => updateStatus(v._id, 'no_show')} className="btn-secondary text-xs py-1">No-show</button>
                   </>
                 )}
+                <button onClick={() => openEdit(v)} className="btn-secondary text-xs py-1" type="button">Edit</button>
+                <button onClick={() => handleDelete(v._id)} className="btn-secondary text-xs py-1 text-red-700" type="button">Delete</button>
               </div>
             </div>
           </div>
         ))}
       </div>
+      <div className="card overflow-hidden">
+        <Pagination page={paged.page} totalPages={paged.totalPages} total={paged.total} onPageChange={setPage} />
+      </div>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Schedule Site Visit">
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditId(''); }} title={editId ? 'Edit Site Visit' : 'Schedule Site Visit'}>
         <form onSubmit={handleCreate} className="space-y-4">
           <div>
             <label className="label">Lead</label>
@@ -97,7 +125,7 @@ export default function SiteVisits() {
             <label className="label">Date & Time</label>
             <input className="input" type="datetime-local" value={form.scheduledAt} onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })} required />
           </div>
-          <button type="submit" className="btn-primary w-full">Schedule</button>
+          <button type="submit" className="btn-primary w-full">{editId ? 'Save Changes' : 'Schedule'}</button>
         </form>
       </Modal>
     </div>

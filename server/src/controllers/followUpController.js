@@ -167,3 +167,56 @@ export const completeFollowUp = async (req, res) => {
     res.status(500).json({ message: err.message || 'Failed to complete follow-up' });
   }
 };
+
+export const updateFollowUp = async (req, res) => {
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const now = new Date();
+    const scheduledAt = req.body.scheduledAt ? new Date(req.body.scheduledAt) : null;
+
+    const existing = await sql`
+      SELECT id FROM "FollowUp"
+      WHERE id = ${req.params.id} AND "builderId" = ${builderId}
+      LIMIT 1
+    `;
+    if (!existing.length) return res.status(404).json({ message: 'Follow-up not found' });
+
+    await sql`
+      UPDATE "FollowUp"
+      SET
+        "leadId" = COALESCE(${req.body.lead ?? null}, "leadId"),
+        "assignedToId" = COALESCE(${req.body.assignedTo ?? null}, "assignedToId"),
+        "scheduledAt" = COALESCE(${scheduledAt}, "scheduledAt"),
+        type = COALESCE(${req.body.type ?? null}, type),
+        notes = COALESCE(${req.body.notes ?? null}, notes),
+        status = COALESCE(${req.body.status ?? null}, status),
+        "updatedAt" = ${now}
+      WHERE id = ${req.params.id}
+    `;
+
+    res.json(await fetchFollowUpById(req.params.id));
+  } catch (err) {
+    console.error('updateFollowUp:', err);
+    res.status(500).json({ message: err.message || 'Failed to update follow-up' });
+  }
+};
+
+export const deleteFollowUp = async (req, res) => {
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const existing = await sql`
+      SELECT id FROM "FollowUp"
+      WHERE id = ${req.params.id} AND "builderId" = ${builderId}
+      LIMIT 1
+    `;
+    if (!existing.length) return res.status(404).json({ message: 'Follow-up not found' });
+
+    await sql`DELETE FROM "FollowUp" WHERE id = ${req.params.id} AND "builderId" = ${builderId}`;
+    res.json({ message: 'Follow-up deleted' });
+  } catch (err) {
+    console.error('deleteFollowUp:', err);
+    res.status(500).json({ message: err.message || 'Failed to delete follow-up' });
+  }
+};
