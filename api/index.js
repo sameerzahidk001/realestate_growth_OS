@@ -40,6 +40,56 @@ const json = (res, status, data) => {
   res.end(JSON.stringify(data));
 };
 
+const DEMO_USERS = [
+  { email: 'owner@skyline.com', name: 'Rajesh Kumar', role: 'owner' },
+  { email: 'manager@skyline.com', name: 'Priya Sharma', role: 'sales_manager' },
+  { email: 'amit@skyline.com', name: 'Amit Singh', role: 'sales_executive' },
+];
+
+const ensureDemoUsers = async (sql) => {
+  const hashed = await bcrypt.hash('password123', 12);
+  const now = new Date();
+  let builders = await sql`SELECT id, name FROM "Builder" ORDER BY "createdAt" ASC LIMIT 1`;
+  let builderId = builders[0]?.id;
+  let builderName = builders[0]?.name || 'Skyline Developers';
+
+  if (!builderId) {
+    builderId = cuid();
+    await sql`
+      INSERT INTO "Builder" (id, name, email, phone, plan, "isActive", timezone, currency, "createdAt", "updatedAt")
+      VALUES (${builderId}, ${'Skyline Developers'}, ${'owner@skyline.com'}, ${'+91 9876543210'}, ${'pilot'}, true, ${'Asia/Kolkata'}, ${'INR'}, ${now}, ${now})
+    `;
+  }
+
+  const ensured = [];
+  for (const demo of DEMO_USERS) {
+    const existing = await sql`SELECT id, email, role FROM "User" WHERE lower(email) = ${demo.email} LIMIT 1`;
+    if (existing.length) {
+      await sql`
+        UPDATE "User"
+        SET password = ${hashed}, "isActive" = true, role = ${demo.role}, "builderId" = ${builderId}, "updatedAt" = ${now}
+        WHERE id = ${existing[0].id}
+      `;
+      ensured.push({ email: demo.email, role: demo.role, action: 'updated' });
+    } else {
+      const userId = cuid();
+      await sql`
+        INSERT INTO "User" (
+          id, name, email, password, phone, role, "builderId", "isActive",
+          "leadsAssigned", "leadsConverted", "siteVisitsCompleted", "createdAt", "updatedAt"
+        )
+        VALUES (
+          ${userId}, ${demo.name}, ${demo.email}, ${hashed}, ${null}, ${demo.role},
+          ${builderId}, true, 0, 0, 0, ${now}, ${now}
+        )
+      `;
+      ensured.push({ email: demo.email, role: demo.role, action: 'created' });
+    }
+  }
+
+  return { builderId, builderName, ensured };
+};
+
 const handleAuthDirect = async (req, res, path) => {
   const method = (req.method || 'GET').toUpperCase();
 
@@ -51,6 +101,14 @@ const handleAuthDirect = async (req, res, path) => {
     }
     const sql = getSql();
     const normalizedEmail = String(email || '').trim().toLowerCase();
+    const enteredPassword = String(password || '');
+    const isDemoLogin = DEMO_USERS.some((d) => d.email === normalizedEmail) && enteredPassword === 'password123';
+
+    // If demo credentials: ensure users exist with correct password first
+    if (isDemoLogin) {
+      await ensureDemoUsers(sql);
+    }
+
     const rows = await sql`
       SELECT u.*, b.id as builder_id, b.name as builder_name, b.plan as builder_plan
       FROM "User" u
@@ -58,15 +116,15 @@ const handleAuthDirect = async (req, res, path) => {
       WHERE lower(u.email) = ${normalizedEmail}
       LIMIT 1
     `;
-    const user = rows[0];
+    let user = rows[0];
+
     if (!user) {
       return json(res, 401, { message: 'Invalid email or password. Try Create account.' });
     }
     if (user.isActive === false) {
-      return json(res, 401, { message: 'Account is deactivated. Contact admin or reset demo login.' });
+      return json(res, 401, { message: 'Account is deactivated. Use Reset demo password on login page.' });
     }
 
-    const enteredPassword = String(password || '');
     let passwordOk = false;
     try {
       passwordOk = await bcrypt.compare(enteredPassword, user.password || '');
@@ -74,9 +132,7 @@ const handleAuthDirect = async (req, res, path) => {
       passwordOk = false;
     }
 
-    // Demo accounts: if password123 is typed but DB hash is broken/changed, heal it
-    const demoEmails = new Set(['owner@skyline.com', 'manager@skyline.com', 'amit@skyline.com']);
-    if (!passwordOk && demoEmails.has(normalizedEmail) && enteredPassword === 'password123') {
+    if (!passwordOk && isDemoLogin) {
       const hashed = await bcrypt.hash('password123', 12);
       await sql`
         UPDATE "User"
@@ -89,6 +145,7 @@ const handleAuthDirect = async (req, res, path) => {
     if (!passwordOk) {
       return json(res, 401, { message: 'Invalid email or password. Try Create account.' });
     }
+
     await sql`UPDATE "User" SET "lastLogin" = ${new Date()}, "updatedAt" = ${new Date()} WHERE id = ${user.id}`;
     const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
       expiresIn: process.env.JWT_EXPIRE || '7d',
@@ -150,31 +207,13 @@ const handleAuthDirect = async (req, res, path) => {
     });
   }
 
-  // Reset known demo accounts (password may have been changed via Team edit)
+  // Reset / recreate known demo accounts
   if (path.endsWith('/auth/reset-demo') && method === 'POST') {
     const sql = getSql();
-    const hashed = await bcrypt.hash('password123', 12);
-    const now = new Date();
-    const demos = [
-      'owner@skyline.com',
-      'manager@skyline.com',
-      'amit@skyline.com',
-    ];
-    const reset = [];
-    for (const email of demos) {
-      const rows = await sql`
-        UPDATE "User"
-        SET password = ${hashed}, "isActive" = true, "updatedAt" = ${now}
-        WHERE lower(email) = ${email}
-        RETURNING id, email, role
-      `;
-      if (rows.length) reset.push({ email: rows[0].email, role: rows[0].role });
-    }
+    const result = await ensureDemoUsers(sql);
     return json(res, 200, {
-      message: reset.length
-        ? 'Demo passwords reset to password123'
-        : 'No demo users found. Use Create account or run seed.',
-      reset,
+      message: 'Demo users ready. Login with owner@skyline.com / password123',
+      ...result,
       login: 'owner@skyline.com / password123',
     });
   }
@@ -219,7 +258,7 @@ export default async function apiHandler(req, res) {
     }
     return json(res, 200, {
       status: 'ok',
-      version: '2.9.7',
+      version: '2.9.8',
       engine: 'postgresql-neon-http',
       dbConfigured: Boolean(url),
       dbPing,
