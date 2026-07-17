@@ -2,6 +2,7 @@ import serverless from 'serverless-http';
 import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { handlePhase1Direct } from './directPhase1.js';
 
 let handler;
 let ready = false;
@@ -161,7 +162,7 @@ export default async function apiHandler(req, res) {
     }
     return json(res, 200, {
       status: 'ok',
-      version: '2.6.0',
+      version: '2.7.0',
       engine: 'postgresql-neon-http',
       dbConfigured: Boolean(url),
       dbPing,
@@ -183,6 +184,21 @@ export default async function apiHandler(req, res) {
       if (handled !== false) return;
     } catch (error) {
       return json(res, 500, { message: error.message || 'Auth error' });
+    }
+  }
+
+  // Phase 1 routes without loading Prisma/Express (avoids serverless hang)
+  if (
+    path.includes('/auth/me') ||
+    path.includes('/users') ||
+    path.includes('/leads')
+  ) {
+    try {
+      const handled = await handlePhase1Direct(req, res, path, json);
+      if (handled) return;
+    } catch (error) {
+      console.error('Phase1 direct error:', error);
+      return json(res, 500, { message: error.message || 'Request failed' });
     }
   }
 
