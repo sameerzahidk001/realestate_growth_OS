@@ -59,7 +59,7 @@ export const createProject = async (req, res) => {
     const sql = getSql();
     const id = cuid();
     const now = new Date();
-    const amenities = req.body.amenities || [];
+    const amenities = Array.isArray(req.body.amenities) ? req.body.amenities : [];
 
     await sql`
       INSERT INTO "Project" (
@@ -69,8 +69,8 @@ export const createProject = async (req, res) => {
       VALUES (
         ${id}, ${getBuilderId(req.user)}, ${req.body.name}, ${req.body.location},
         ${req.body.city || null}, ${Number(req.body.totalUnits) || 0}, ${req.body.description || null},
-        ${amenities}, ${req.body.priceList ? JSON.stringify(req.body.priceList) : null}::jsonb,
-        ${req.body.brochure || null}, ARRAY[]::text[],
+        ${amenities}, ${req.body.priceList ? JSON.stringify(req.body.priceList) : null},
+        ${req.body.brochure || null}, ${[]},
         ${req.body.status || 'under_construction'}, true, ${now}, ${now}
       )
     `;
