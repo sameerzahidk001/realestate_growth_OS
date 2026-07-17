@@ -1,5 +1,5 @@
-import prisma from '../lib/prisma.js';
 import { getSql } from '../lib/neonSql.js';
+import { cuid } from '../lib/neonLeadHelpers.js';
 import { hashPassword } from '../lib/password.js';
 import { formatId, getBuilderId } from '../utils/apiFormat.js';
 
@@ -20,50 +20,95 @@ export const getUsers = async (req, res) => {
 };
 
 export const createUser = async (req, res) => {
-  const { name, email, password, phone, role } = req.body;
+  try {
+    const sql = getSql();
+    const { name, email, password, phone, role } = req.body;
+    const builderId = getBuilderId(req.user);
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) return res.status(400).json({ message: 'Email already exists' });
+    const existing = await sql`SELECT id FROM "User" WHERE email = ${email} LIMIT 1`;
+    if (existing.length) return res.status(400).json({ message: 'Email already exists' });
 
-  const user = await prisma.user.create({
-    data: {
-      name,
-      email,
-      password: await hashPassword(password),
-      phone,
-      role: role || 'sales_executive',
-      builderId: getBuilderId(req.user),
-    },
-    select: { id: true, name: true, email: true, phone: true, role: true, isActive: true },
-  });
+    const id = cuid();
+    const now = new Date();
+    const hashed = await hashPassword(password);
 
-  res.status(201).json(formatId(user));
+    await sql`
+      INSERT INTO "User" (
+        id, name, email, password, phone, role, "builderId", "isActive",
+        "leadsAssigned", "leadsConverted", "siteVisitsCompleted", "createdAt", "updatedAt"
+      )
+      VALUES (
+        ${id}, ${name}, ${email}, ${hashed}, ${phone || null}, ${role || 'sales_executive'},
+        ${builderId}, true, 0, 0, 0, ${now}, ${now}
+      )
+    `;
+
+    const rows = await sql`
+      SELECT id, name, email, phone, role, "isActive"
+      FROM "User" WHERE id = ${id} LIMIT 1
+    `;
+    res.status(201).json(formatId(rows[0]));
+  } catch (err) {
+    console.error('createUser:', err);
+    res.status(500).json({ message: err.message || 'Failed to create user' });
+  }
 };
 
 export const updateUser = async (req, res) => {
-  const { password, ...data } = req.body;
-  const updateData = { ...data };
-  if (password) updateData.password = await hashPassword(password);
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const { password, ...data } = req.body;
+    const now = new Date();
 
-  const user = await prisma.user.updateMany({
-    where: { id: req.params.id, builderId: getBuilderId(req.user) },
-    data: updateData,
-  });
+    const existing = await sql`
+      SELECT id FROM "User" WHERE id = ${req.params.id} AND "builderId" = ${builderId} LIMIT 1
+    `;
+    if (!existing.length) return res.status(404).json({ message: 'User not found' });
 
-  if (!user.count) return res.status(404).json({ message: 'User not found' });
+    const hashed = password ? await hashPassword(password) : null;
 
-  const updated = await prisma.user.findUnique({
-    where: { id: req.params.id },
-    select: { id: true, name: true, email: true, phone: true, role: true, isActive: true },
-  });
-  res.json(formatId(updated));
+    await sql`
+      UPDATE "User"
+      SET
+        name = COALESCE(${data.name ?? null}, name),
+        email = COALESCE(${data.email ?? null}, email),
+        phone = COALESCE(${data.phone ?? null}, phone),
+        role = COALESCE(${data.role ?? null}, role),
+        password = COALESCE(${hashed}, password),
+        "updatedAt" = ${now}
+      WHERE id = ${req.params.id}
+    `;
+
+    const rows = await sql`
+      SELECT id, name, email, phone, role, "isActive"
+      FROM "User" WHERE id = ${req.params.id} LIMIT 1
+    `;
+    res.json(formatId(rows[0]));
+  } catch (err) {
+    console.error('updateUser:', err);
+    res.status(500).json({ message: err.message || 'Failed to update user' });
+  }
 };
 
 export const deleteUser = async (req, res) => {
-  const result = await prisma.user.updateMany({
-    where: { id: req.params.id, builderId: getBuilderId(req.user) },
-    data: { isActive: false },
-  });
-  if (!result.count) return res.status(404).json({ message: 'User not found' });
-  res.json({ message: 'User deactivated' });
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const now = new Date();
+
+    const existing = await sql`
+      SELECT id FROM "User" WHERE id = ${req.params.id} AND "builderId" = ${builderId} LIMIT 1
+    `;
+    if (!existing.length) return res.status(404).json({ message: 'User not found' });
+
+    await sql`
+      UPDATE "User" SET "isActive" = false, "updatedAt" = ${now}
+      WHERE id = ${req.params.id}
+    `;
+    res.json({ message: 'User deactivated' });
+  } catch (err) {
+    console.error('deleteUser:', err);
+    res.status(500).json({ message: err.message || 'Failed to deactivate user' });
+  }
 };

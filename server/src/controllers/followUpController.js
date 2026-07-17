@@ -1,87 +1,169 @@
-import prisma from '../lib/prisma.js';
+import { getSql } from '../lib/neonSql.js';
+import { cuid } from '../lib/neonLeadHelpers.js';
 import { formatId, getBuilderId, getUserId } from '../utils/apiFormat.js';
 
-export const getFollowUps = async (req, res) => {
-  const where = { builderId: getBuilderId(req.user) };
-  if (req.user.role === 'sales_executive') where.assignedToId = getUserId(req.user);
-  if (req.query.status) where.status = req.query.status;
-
-  const followUps = await prisma.followUp.findMany({
-    where,
-    include: {
-      lead: { select: { id: true, name: true, phone: true, status: true, aiScore: true } },
-      assignedTo: { select: { id: true, name: true } },
-    },
-    orderBy: { scheduledAt: 'asc' },
+const mapFollowUp = (row) =>
+  formatId({
+    id: row.id,
+    _id: row.id,
+    leadId: row.leadId,
+    builderId: row.builderId,
+    assignedToId: row.assignedToId,
+    scheduledAt: row.scheduledAt,
+    type: row.type,
+    notes: row.notes,
+    status: row.status,
+    completedAt: row.completedAt,
+    summary: row.summary,
+    createdAt: row.createdAt,
+    lead: row.lead_id
+      ? {
+          id: row.lead_id,
+          _id: row.lead_id,
+          name: row.lead_name,
+          phone: row.lead_phone,
+          status: row.lead_status,
+          aiScore: row.lead_ai_score,
+        }
+      : undefined,
+    assignedTo: row.assign_id
+      ? { id: row.assign_id, _id: row.assign_id, name: row.assign_name }
+      : undefined,
   });
-  res.json(formatId(followUps));
+
+const fetchFollowUpById = async (id) => {
+  const sql = getSql();
+  const rows = await sql`
+    SELECT
+      f.*,
+      l.id AS lead_id, l.name AS lead_name, l.phone AS lead_phone, l.status AS lead_status, l."aiScore" AS lead_ai_score,
+      u.id AS assign_id, u.name AS assign_name
+    FROM "FollowUp" f
+    LEFT JOIN "Lead" l ON l.id = f."leadId"
+    LEFT JOIN "User" u ON u.id = f."assignedToId"
+    WHERE f.id = ${id}
+    LIMIT 1
+  `;
+  return mapFollowUp(rows[0]);
+};
+
+export const getFollowUps = async (req, res) => {
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const status = req.query.status;
+
+    const rows = await sql`
+      SELECT
+        f.*,
+        l.id AS lead_id, l.name AS lead_name, l.phone AS lead_phone, l.status AS lead_status, l."aiScore" AS lead_ai_score,
+        u.id AS assign_id, u.name AS assign_name
+      FROM "FollowUp" f
+      LEFT JOIN "Lead" l ON l.id = f."leadId"
+      LEFT JOIN "User" u ON u.id = f."assignedToId"
+      WHERE f."builderId" = ${builderId}
+      ${req.user.role === 'sales_executive' ? sql`AND f."assignedToId" = ${getUserId(req.user)}` : sql``}
+      ${status ? sql`AND f.status = ${status}` : sql``}
+      ORDER BY f."scheduledAt" ASC
+    `;
+    res.json(rows.map(mapFollowUp));
+  } catch (err) {
+    console.error('getFollowUps:', err);
+    res.status(500).json({ message: err.message || 'Failed to load follow-ups' });
+  }
 };
 
 export const getDueFollowUps = async (req, res) => {
-  const where = {
-    builderId: getBuilderId(req.user),
-    status: 'pending',
-    scheduledAt: { lte: new Date() },
-  };
-  if (req.user.role === 'sales_executive') where.assignedToId = getUserId(req.user);
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const now = new Date();
 
-  const due = await prisma.followUp.findMany({
-    where,
-    include: { lead: { select: { id: true, name: true, phone: true, status: true, aiScore: true } } },
-    orderBy: { scheduledAt: 'asc' },
-  });
-  res.json(formatId(due));
+    const rows = await sql`
+      SELECT
+        f.*,
+        l.id AS lead_id, l.name AS lead_name, l.phone AS lead_phone, l.status AS lead_status, l."aiScore" AS lead_ai_score,
+        u.id AS assign_id, u.name AS assign_name
+      FROM "FollowUp" f
+      LEFT JOIN "Lead" l ON l.id = f."leadId"
+      LEFT JOIN "User" u ON u.id = f."assignedToId"
+      WHERE f."builderId" = ${builderId}
+        AND f.status = 'pending'
+        AND f."scheduledAt" <= ${now}
+      ${req.user.role === 'sales_executive' ? sql`AND f."assignedToId" = ${getUserId(req.user)}` : sql``}
+      ORDER BY f."scheduledAt" ASC
+    `;
+    res.json(rows.map(mapFollowUp));
+  } catch (err) {
+    console.error('getDueFollowUps:', err);
+    res.status(500).json({ message: err.message || 'Failed to load due follow-ups' });
+  }
 };
 
 export const createFollowUp = async (req, res) => {
-  const followUp = await prisma.followUp.create({
-    data: {
-      leadId: req.body.lead,
-      builderId: getBuilderId(req.user),
-      assignedToId: req.body.assignedTo || getUserId(req.user),
-      scheduledAt: new Date(req.body.scheduledAt),
-      type: req.body.type || 'call',
-      notes: req.body.notes,
-    },
-    include: { lead: { select: { id: true, name: true, phone: true } } },
-  });
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const userId = getUserId(req.user);
+    const id = cuid();
+    const now = new Date();
+    const scheduledAt = new Date(req.body.scheduledAt);
+    const assignedToId = req.body.assignedTo || userId;
 
-  if (req.body.lead) {
-    await prisma.lead.update({
-      where: { id: req.body.lead },
-      data: { nextFollowUpAt: new Date(req.body.scheduledAt) },
-    });
+    await sql`
+      INSERT INTO "FollowUp" (
+        id, "leadId", "builderId", "assignedToId", "scheduledAt", type, notes,
+        status, "isAiGenerated", "createdAt", "updatedAt"
+      )
+      VALUES (
+        ${id}, ${req.body.lead}, ${builderId}, ${assignedToId}, ${scheduledAt},
+        ${req.body.type || 'call'}, ${req.body.notes || null},
+        'pending', false, ${now}, ${now}
+      )
+    `;
+
+    if (req.body.lead) {
+      await sql`UPDATE "Lead" SET "nextFollowUpAt" = ${scheduledAt}, "updatedAt" = ${now} WHERE id = ${req.body.lead}`;
+    }
+
+    res.status(201).json(await fetchFollowUpById(id));
+  } catch (err) {
+    console.error('createFollowUp:', err);
+    res.status(500).json({ message: err.message || 'Failed to create follow-up' });
   }
-
-  res.status(201).json(formatId(followUp));
 };
 
 export const completeFollowUp = async (req, res) => {
-  const { summary, notes } = req.body;
-  const existing = await prisma.followUp.findFirst({
-    where: { id: req.params.id, builderId: getBuilderId(req.user) },
-  });
-  if (!existing) return res.status(404).json({ message: 'Follow-up not found' });
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const userId = getUserId(req.user);
+    const { summary, notes } = req.body;
+    const now = new Date();
 
-  const followUp = await prisma.followUp.update({
-    where: { id: existing.id },
-    data: { status: 'completed', completedAt: new Date(), summary, notes },
-    include: { lead: { select: { id: true, name: true } } },
-  });
+    const existing = await sql`
+      SELECT id, "leadId" FROM "FollowUp"
+      WHERE id = ${req.params.id} AND "builderId" = ${builderId}
+      LIMIT 1
+    `;
+    if (!existing.length) return res.status(404).json({ message: 'Follow-up not found' });
 
-  await prisma.lead.update({
-    where: { id: followUp.leadId },
-    data: { lastContactedAt: new Date() },
-  });
+    await sql`
+      UPDATE "FollowUp"
+      SET status = 'completed', "completedAt" = ${now}, summary = ${summary || null}, notes = ${notes || null}, "updatedAt" = ${now}
+      WHERE id = ${req.params.id}
+    `;
 
-  await prisma.leadActivity.create({
-    data: {
-      leadId: followUp.leadId,
-      type: 'follow_up',
-      description: summary || notes || 'Follow-up completed',
-      createdById: getUserId(req.user),
-    },
-  });
+    const leadId = existing[0].leadId;
+    await sql`UPDATE "Lead" SET "lastContactedAt" = ${now}, "updatedAt" = ${now} WHERE id = ${leadId}`;
+    await sql`
+      INSERT INTO "LeadActivity" (id, "leadId", type, description, "createdById", "createdAt")
+      VALUES (${cuid()}, ${leadId}, 'follow_up', ${summary || notes || 'Follow-up completed'}, ${userId}, ${now})
+    `;
 
-  res.json(formatId(followUp));
+    res.json(await fetchFollowUpById(req.params.id));
+  } catch (err) {
+    console.error('completeFollowUp:', err);
+    res.status(500).json({ message: err.message || 'Failed to complete follow-up' });
+  }
 };

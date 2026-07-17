@@ -1,65 +1,151 @@
-import prisma from '../lib/prisma.js';
+import { getSql } from '../lib/neonSql.js';
+import { cuid } from '../lib/neonLeadHelpers.js';
 import { formatId, getBuilderId, getUserId } from '../utils/apiFormat.js';
 
-export const getSiteVisits = async (req, res) => {
-  const where = { builderId: getBuilderId(req.user) };
-  if (req.user.role === 'sales_executive') where.assignedToId = getUserId(req.user);
-  if (req.query.status) where.status = req.query.status;
-
-  const visits = await prisma.siteVisit.findMany({
-    where,
-    include: {
-      lead: { select: { id: true, name: true, phone: true } },
-      project: { select: { id: true, name: true, location: true } },
-      assignedTo: { select: { id: true, name: true } },
-    },
-    orderBy: { scheduledAt: 'desc' },
+const mapSiteVisit = (row) =>
+  formatId({
+    id: row.id,
+    _id: row.id,
+    leadId: row.leadId,
+    builderId: row.builderId,
+    projectId: row.projectId,
+    assignedToId: row.assignedToId,
+    scheduledAt: row.scheduledAt,
+    status: row.status,
+    feedback: row.feedback,
+    rating: row.rating,
+    completedAt: row.completedAt,
+    createdAt: row.createdAt,
+    lead: row.lead_id
+      ? { id: row.lead_id, _id: row.lead_id, name: row.lead_name, phone: row.lead_phone }
+      : undefined,
+    project: row.project_id
+      ? { id: row.project_id, _id: row.project_id, name: row.project_name, location: row.project_location }
+      : undefined,
+    assignedTo: row.assign_id
+      ? { id: row.assign_id, _id: row.assign_id, name: row.assign_name }
+      : undefined,
   });
-  res.json(formatId(visits));
+
+const fetchSiteVisitById = async (id) => {
+  const sql = getSql();
+  const rows = await sql`
+    SELECT
+      v.*,
+      l.id AS lead_id, l.name AS lead_name, l.phone AS lead_phone,
+      p.id AS project_id, p.name AS project_name, p.location AS project_location,
+      u.id AS assign_id, u.name AS assign_name
+    FROM "SiteVisit" v
+    LEFT JOIN "Lead" l ON l.id = v."leadId"
+    LEFT JOIN "Project" p ON p.id = v."projectId"
+    LEFT JOIN "User" u ON u.id = v."assignedToId"
+    WHERE v.id = ${id}
+    LIMIT 1
+  `;
+  return mapSiteVisit(rows[0]);
+};
+
+export const getSiteVisits = async (req, res) => {
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const status = req.query.status;
+
+    const rows = await sql`
+      SELECT
+        v.*,
+        l.id AS lead_id, l.name AS lead_name, l.phone AS lead_phone,
+        p.id AS project_id, p.name AS project_name, p.location AS project_location,
+        u.id AS assign_id, u.name AS assign_name
+      FROM "SiteVisit" v
+      LEFT JOIN "Lead" l ON l.id = v."leadId"
+      LEFT JOIN "Project" p ON p.id = v."projectId"
+      LEFT JOIN "User" u ON u.id = v."assignedToId"
+      WHERE v."builderId" = ${builderId}
+      ${req.user.role === 'sales_executive' ? sql`AND v."assignedToId" = ${getUserId(req.user)}` : sql``}
+      ${status ? sql`AND v.status = ${status}` : sql``}
+      ORDER BY v."scheduledAt" DESC
+    `;
+    res.json(rows.map(mapSiteVisit));
+  } catch (err) {
+    console.error('getSiteVisits:', err);
+    res.status(500).json({ message: err.message || 'Failed to load site visits' });
+  }
 };
 
 export const createSiteVisit = async (req, res) => {
-  const visit = await prisma.siteVisit.create({
-    data: {
-      leadId: req.body.lead,
-      builderId: getBuilderId(req.user),
-      projectId: req.body.project,
-      assignedToId: req.body.assignedTo || getUserId(req.user),
-      scheduledAt: new Date(req.body.scheduledAt),
-    },
-    include: {
-      lead: { select: { id: true, name: true, phone: true } },
-      project: { select: { id: true, name: true } },
-    },
-  });
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const userId = getUserId(req.user);
+    const id = cuid();
+    const now = new Date();
+    const scheduledAt = new Date(req.body.scheduledAt);
+    const assignedToId = req.body.assignedTo || userId;
 
-  await prisma.lead.update({
-    where: { id: req.body.lead },
-    data: { status: 'interested', lastContactedAt: new Date() },
-  });
+    await sql`
+      INSERT INTO "SiteVisit" (
+        id, "leadId", "builderId", "projectId", "assignedToId", "scheduledAt",
+        status, "aiPlanned", "createdAt", "updatedAt"
+      )
+      VALUES (
+        ${id}, ${req.body.lead}, ${builderId}, ${req.body.project}, ${assignedToId}, ${scheduledAt},
+        'scheduled', false, ${now}, ${now}
+      )
+    `;
 
-  res.status(201).json(formatId(visit));
+    await sql`
+      UPDATE "Lead"
+      SET status = 'interested', "lastContactedAt" = ${now}, "updatedAt" = ${now}
+      WHERE id = ${req.body.lead}
+    `;
+
+    res.status(201).json(await fetchSiteVisitById(id));
+  } catch (err) {
+    console.error('createSiteVisit:', err);
+    res.status(500).json({ message: err.message || 'Failed to create site visit' });
+  }
 };
 
 export const updateSiteVisit = async (req, res) => {
-  const data = { ...req.body };
-  if (req.body.scheduledAt) data.scheduledAt = new Date(req.body.scheduledAt);
-  if (req.body.status === 'completed') data.completedAt = new Date();
+  try {
+    const sql = getSql();
+    const builderId = getBuilderId(req.user);
+    const now = new Date();
+    const status = req.body.status;
+    const feedback = req.body.feedback ?? null;
+    const completedAt = status === 'completed' ? new Date(req.body.completedAt || now) : null;
+    const scheduledAt = req.body.scheduledAt ? new Date(req.body.scheduledAt) : null;
 
-  const result = await prisma.siteVisit.updateMany({
-    where: { id: req.params.id, builderId: getBuilderId(req.user) },
-    data,
-  });
-  if (!result.count) return res.status(404).json({ message: 'Site visit not found' });
+    const existing = await sql`
+      SELECT id, "leadId" FROM "SiteVisit"
+      WHERE id = ${req.params.id} AND "builderId" = ${builderId}
+      LIMIT 1
+    `;
+    if (!existing.length) return res.status(404).json({ message: 'Site visit not found' });
 
-  const visit = await prisma.siteVisit.findUnique({
-    where: { id: req.params.id },
-    include: { lead: { select: { id: true, name: true } }, project: { select: { id: true, name: true } } },
-  });
+    await sql`
+      UPDATE "SiteVisit"
+      SET
+        status = COALESCE(${status ?? null}, status),
+        feedback = COALESCE(${feedback}, feedback),
+        "completedAt" = COALESCE(${completedAt}, "completedAt"),
+        "scheduledAt" = COALESCE(${scheduledAt}, "scheduledAt"),
+        "updatedAt" = ${now}
+      WHERE id = ${req.params.id}
+    `;
 
-  if (req.body.status === 'completed' && visit?.leadId) {
-    await prisma.lead.update({ where: { id: visit.leadId }, data: { status: 'site_visit_done' } });
+    if (status === 'completed' && existing[0].leadId) {
+      await sql`
+        UPDATE "Lead"
+        SET status = 'site_visit_done', "updatedAt" = ${now}
+        WHERE id = ${existing[0].leadId}
+      `;
+    }
+
+    res.json(await fetchSiteVisitById(req.params.id));
+  } catch (err) {
+    console.error('updateSiteVisit:', err);
+    res.status(500).json({ message: err.message || 'Failed to update site visit' });
   }
-
-  res.json(formatId(visit));
 };

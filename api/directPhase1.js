@@ -76,17 +76,63 @@ const readBody = async (req) => {
   return raw ? JSON.parse(raw) : {};
 };
 
+const authorize = (user, roles) => roles.includes(user.role);
+
+// Order matters: more specific routes first
+const ROUTES = [
+  { match: /^\/dashboard\/reports\/source$/, methods: { GET: ['dashboard', 'getLeadSourceReport'] } },
+  { match: /^\/dashboard\/reports\/funnel$/, methods: { GET: ['dashboard', 'getFunnelReport'] } },
+  { match: /^\/dashboard\/reports\/executive$/, methods: { GET: ['dashboard', 'getExecutiveReport'] } },
+  { match: /^\/dashboard$/, methods: { GET: ['dashboard', 'getDashboard'] } },
+
+  { match: /^\/follow-ups\/due$/, methods: { GET: ['followUp', 'getDueFollowUps'] } },
+  { match: /^\/follow-ups\/([^/]+)\/complete$/, methods: { PATCH: ['followUp', 'completeFollowUp'], params: ['id'] } },
+  { match: /^\/follow-ups$/, methods: { GET: ['followUp', 'getFollowUps'], POST: ['followUp', 'createFollowUp'] } },
+
+  { match: /^\/site-visits\/([^/]+)$/, methods: { PUT: ['siteVisit', 'updateSiteVisit'], params: ['id'] } },
+  { match: /^\/site-visits$/, methods: { GET: ['siteVisit', 'getSiteVisits'], POST: ['siteVisit', 'createSiteVisit'] } },
+
+  { match: /^\/projects\/units\/([^/]+)\/link$/, methods: { PATCH: ['project', 'linkUnitToLead'], params: ['id'] } },
+  { match: /^\/projects\/units\/([^/]+)$/, methods: { PUT: ['project', 'updateUnit'], params: ['id'] } },
+  { match: /^\/projects\/([^/]+)\/units$/, methods: { GET: ['project', 'getUnits'], POST: ['project', 'createUnit'], params: ['projectId'] } },
+  { match: /^\/projects\/([^/]+)$/, methods: { GET: ['project', 'getProject'], PUT: ['project', 'updateProject'], params: ['id'] } },
+  { match: /^\/projects$/, methods: { GET: ['project', 'getProjects'], POST: ['project', 'createProject'] } },
+
+  { match: /^\/users\/([^/]+)$/, methods: { PUT: ['user', 'updateUser'], DELETE: ['user', 'deleteUser'], params: ['id'] }, roles: ['owner', 'sales_manager'] },
+  { match: /^\/users$/, methods: { GET: ['user', 'getUsers'], POST: ['user', 'createUser'] }, roles: ['owner', 'sales_manager'] },
+
+  { match: /^\/auth\/me$/, methods: { GET: ['auth', 'getMe'] } },
+
+  { match: /^\/leads\/pipeline$/, methods: { GET: ['lead', 'getPipeline'] } },
+  { match: /^\/leads\/([^/]+)\/status$/, methods: { PATCH: ['lead', 'updateLeadStatus'], params: ['id'] } },
+  { match: /^\/leads\/([^/]+)\/notes$/, methods: { POST: ['lead', 'addLeadNote'], params: ['id'] } },
+  { match: /^\/leads\/([^/]+)$/, methods: { GET: ['lead', 'getLead'], PUT: ['lead', 'updateLead'], params: ['id'] } },
+  { match: /^\/leads$/, methods: { GET: ['lead', 'getLeads'], POST: ['lead', 'createLead'] } },
+];
+
+const CONTROLLERS = {
+  dashboard: () => import('../server/src/controllers/dashboardController.js'),
+  followUp: () => import('../server/src/controllers/followUpController.js'),
+  siteVisit: () => import('../server/src/controllers/siteVisitController.js'),
+  project: () => import('../server/src/controllers/projectController.js'),
+  user: () => import('../server/src/controllers/userController.js'),
+  lead: () => import('../server/src/controllers/leadController.js'),
+};
+
 const matchRoute = (pathname) => {
   const clean = pathname.replace(/^\/api/, '').replace(/\/$/, '') || '/';
 
-  if (clean === '/auth/me') return { name: 'authMe' };
-  if (clean === '/users') return { name: 'users' };
-  if (clean === '/leads') return { name: 'leads' };
-  if (clean === '/leads/pipeline') return { name: 'pipeline' };
-  if (/^\/leads\/[^/]+\/status$/.test(clean)) return { name: 'leadStatus', id: clean.split('/')[2] };
-  if (/^\/leads\/[^/]+\/notes$/.test(clean)) return { name: 'leadNotes', id: clean.split('/')[2] };
-  if (/^\/leads\/[^/]+$/.test(clean)) return { name: 'leadById', id: clean.split('/')[2] };
+  for (const route of ROUTES) {
+    const m = clean.match(route.match);
+    if (!m) continue;
 
+    const params = {};
+    route.params?.forEach((name, i) => {
+      params[name] = m[i + 1];
+    });
+
+    return { ...route, params };
+  }
   return null;
 };
 
@@ -96,56 +142,62 @@ export const handlePhase1Direct = async (req, res, path, jsonFn) => {
   const route = matchRoute(pathname);
   if (!route) return false;
 
-  const publicRoutes = new Set([]);
-  if (!publicRoutes.has(route.name)) {
-    try {
-      const user = await authenticate(req);
-      if (!user) {
-        jsonFn(res, 401, { message: 'Not authorized' });
-        return true;
-      }
-      req.user = user;
-    } catch {
+  const handlerKey = route.methods[method];
+  if (!handlerKey) return false;
+
+  const [controllerName, actionName] = handlerKey;
+
+  try {
+    const user = await authenticate(req);
+    if (!user) {
       jsonFn(res, 401, { message: 'Not authorized' });
       return true;
     }
-  }
 
-  const body = method === 'GET' || method === 'HEAD' ? {} : await readBody(req);
-  const expressReq = {
-    method,
-    headers: req.headers,
-    query,
-    params: route.id ? { id: route.id } : {},
-    body,
-    user: req.user,
-  };
-  const expressRes = adaptRes(res, jsonFn);
+    if (route.roles && !authorize(user, route.roles)) {
+      jsonFn(res, 403, { message: 'Access denied for this role' });
+      return true;
+    }
 
-  if (route.name === 'authMe' && method === 'GET') {
-    jsonFn(res, 200, req.user);
+    req.user = user;
+
+    if (controllerName === 'auth' && actionName === 'getMe') {
+      jsonFn(res, 200, user);
+      return true;
+    }
+
+    const body = method === 'GET' || method === 'HEAD' ? {} : await readBody(req);
+    const expressReq = {
+      method,
+      headers: req.headers,
+      query,
+      params: route.params || {},
+      body,
+      user,
+    };
+    const expressRes = adaptRes(res, jsonFn);
+
+    const controller = await CONTROLLERS[controllerName]();
+    await controller[actionName](expressReq, expressRes);
+    return true;
+  } catch (error) {
+    console.error(`Direct route error [${method} ${pathname}]:`, error);
+    jsonFn(res, 500, { message: error.message || 'Request failed' });
     return true;
   }
+};
 
-  if (route.name === 'users' && method === 'GET') {
-    const { getUsers } = await import('../server/src/controllers/userController.js');
-    await getUsers(expressReq, expressRes);
-    return true;
-  }
-
-  const leadActions = {
-    leads: { GET: 'getLeads', POST: 'createLead' },
-    pipeline: { GET: 'getPipeline' },
-    leadById: { GET: 'getLead', PUT: 'updateLead' },
-    leadStatus: { PATCH: 'updateLeadStatus' },
-    leadNotes: { POST: 'addLeadNote' },
-  };
-
-  const actionMap = leadActions[route.name];
-  const actionName = actionMap?.[method];
-  if (!actionName) return false;
-
-  const controller = await import('../server/src/controllers/leadController.js');
-  await controller[actionName](expressReq, expressRes);
-  return true;
+export const isPhase1Path = (path) => {
+  const { pathname } = parsePath(path);
+  const clean = pathname.replace(/^\/api/, '').replace(/\/$/, '') || '/';
+  const prefixes = [
+    '/auth/me',
+    '/users',
+    '/leads',
+    '/dashboard',
+    '/follow-ups',
+    '/site-visits',
+    '/projects',
+  ];
+  return prefixes.some((p) => clean === p || clean.startsWith(`${p}/`));
 };
